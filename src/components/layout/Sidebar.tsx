@@ -4,23 +4,24 @@ import { useAuth } from '@/hooks/useAuth'
 import {
   LayoutDashboard, ShoppingCart, Package, Palette, Users,
   HardHat, Warehouse, ShoppingBag, FileText, Calculator,
-  BarChart3, Settings, LogOut, ChevronRight, Truck
+  BarChart3, Settings, LogOut, ChevronRight, Truck, ClipboardList
 } from 'lucide-react'
 
 const NAV_ITEMS = [
-  { key: 'dashboard',   icon: LayoutDashboard, label: 'لوحة التحكم',  roles: ['admin','manager','cashier','warehouse'] },
-  { key: 'pos',         icon: ShoppingCart,    label: 'الكاشير',        roles: ['admin','manager','cashier'] },
-  { key: 'sales',       icon: FileText,        label: 'المبيعات',       roles: ['admin','manager','cashier'] },
-  { key: 'products',    icon: Package,         label: 'المنتجات',       roles: ['admin','manager','warehouse'] },
-  { key: 'colors',      icon: Palette,         label: 'نظام الألوان',   roles: ['admin','manager','cashier'] },
-  { key: 'customers',   icon: Users,           label: 'العملاء',        roles: ['admin','manager','cashier'] },
-  { key: 'contractors', icon: HardHat,         label: 'المقاولون',      roles: ['admin','manager'] },
-  { key: 'inventory',   icon: Warehouse,       label: 'المخزون',        roles: ['admin','manager','warehouse'] },
-  { key: 'purchases',   icon: ShoppingBag,     label: 'المشتريات',      roles: ['admin','manager','warehouse'] },
-  { key: 'suppliers',   icon: Truck,           label: 'الموردون',       roles: ['admin','manager'] },
-  { key: 'accounting',  icon: Calculator,      label: 'الحسابات',       roles: ['admin','manager'] },
-  { key: 'reports',     icon: BarChart3,       label: 'التقارير',       roles: ['admin','manager'] },
-  { key: 'settings',    icon: Settings,        label: 'الإعدادات',      roles: ['admin'] },
+  { key: 'dashboard',    icon: LayoutDashboard, label: 'لوحة التحكم',  roles: ['admin','manager','cashier','warehouse'] },
+  { key: 'pos',          icon: ShoppingCart,    label: 'الكاشير',        roles: ['admin','manager','cashier'] },
+  { key: 'sales',        icon: FileText,        label: 'المبيعات',       roles: ['admin','manager','cashier'] },
+  { key: 'products',     icon: Package,         label: 'المنتجات',       roles: ['admin','manager','warehouse'] },
+  { key: 'colors',       icon: Palette,         label: 'نظام الألوان',   roles: ['admin','manager','cashier'] },
+  { key: 'customers',    icon: Users,           label: 'العملاء',        roles: ['admin','manager','cashier'] },
+  { key: 'contractors',  icon: HardHat,         label: 'المقاولون',      roles: ['admin','manager'] },
+  { key: 'stock-taking', icon: ClipboardList,   label: 'جرد سريع',       roles: ['admin','manager','warehouse'] },
+  { key: 'inventory',    icon: Warehouse,       label: 'المخزون',        roles: ['admin','manager','warehouse'] },
+  { key: 'purchases',    icon: ShoppingBag,     label: 'المشتريات',      roles: ['admin','manager','warehouse'] },
+  { key: 'suppliers',    icon: Truck,           label: 'الموردون',       roles: ['admin','manager'] },
+  { key: 'accounting',   icon: Calculator,      label: 'الحسابات',       roles: ['admin','manager'] },
+  { key: 'reports',      icon: BarChart3,       label: 'التقارير',       roles: ['admin','manager'] },
+  { key: 'settings',     icon: Settings,        label: 'الإعدادات',      roles: ['admin'] },
 ]
 
 export default function Sidebar() {
@@ -41,7 +42,6 @@ export default function Sidebar() {
       className={`fixed right-0 top-0 h-full text-white z-40 flex flex-col transition-all duration-300 shadow-2xl ${sidebarOpen ? 'w-64' : 'w-16'}`}
       style={{ backgroundColor: '#1B2E4B' }}
     >
-      {/* Logo Header */}
       <div className="flex items-center gap-3 p-4 border-b border-white/10 min-h-[64px]">
         <div
           className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 text-lg"
@@ -66,7 +66,6 @@ export default function Sidebar() {
         </button>
       </div>
 
-      {/* Navigation */}
       <nav className="flex-1 overflow-y-auto py-3 space-y-1 px-2">
         {visibleItems.map(item => {
           const isActive = activeModule === item.key
@@ -93,7 +92,6 @@ export default function Sidebar() {
         })}
       </nav>
 
-      {/* User Info + Logout */}
       <div className="border-t border-white/10 p-3 space-y-2">
         {sidebarOpen && user && (
           <div className="flex items-center gap-2 px-2 py-1">
