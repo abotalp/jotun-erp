@@ -1,24 +1,3 @@
-# 🎨 معرض جوتن للدهانات
+# Jotun Paint ERP
 
-نظام ERP + POS متكامل لإدارة معارض الدهانات
-
-## المميزات
-
-- شاشة كاشير احترافية
-- إدارة المنتجات والمخزون
-- نظام ألوان متكامل
-- تقارير شاملة
-- جرد سريع
-
-## التقنيات
-
-- React + TypeScript
-- Vite
-- Tailwind CSS
-- Supabase
-
-## التشغيل المحلي
-
-```bash
-npm install
-npm run dev
+System for paint store management
