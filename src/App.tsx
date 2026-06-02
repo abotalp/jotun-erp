@@ -11,6 +11,7 @@ import SalesPage from '@/pages/SalesPage'
 import ColorsPage from '@/pages/ColorsPage'
 import ContractorsPage from '@/pages/ContractorsPage'
 import InventoryPage from '@/pages/InventoryPage'
+import StockTakingPage from '@/pages/StockTakingPage'
 import SuppliersPage from '@/pages/SuppliersPage'
 import PurchasesPage from '@/pages/PurchasesPage'
 import AccountingPage from '@/pages/AccountingPage'
@@ -32,20 +33,21 @@ function LoadingScreen() {
 function MainContent() {
   const { activeModule } = useAppStore()
   switch (activeModule) {
-    case 'dashboard':   return <DashboardPage />
-    case 'pos':         return <POSPage />
-    case 'products':    return <ProductsPage />
-    case 'customers':   return <CustomersPage />
-    case 'sales':       return <SalesPage />
-    case 'colors':      return <ColorsPage />
-    case 'contractors': return <ContractorsPage />
-    case 'inventory':   return <InventoryPage />
-    case 'suppliers':   return <SuppliersPage />
-    case 'purchases':   return <PurchasesPage />
-    case 'accounting':  return <AccountingPage />
-    case 'reports':     return <ReportsPage />
-    case 'settings':    return <SettingsPage />
-    default:            return <DashboardPage />
+    case 'dashboard':    return <DashboardPage />
+    case 'pos':          return <POSPage />
+    case 'products':     return <ProductsPage />
+    case 'customers':    return <CustomersPage />
+    case 'sales':        return <SalesPage />
+    case 'colors':       return <ColorsPage />
+    case 'contractors':  return <ContractorsPage />
+    case 'inventory':    return <InventoryPage />
+    case 'stock-taking': return <StockTakingPage />
+    case 'suppliers':    return <SuppliersPage />
+    case 'purchases':    return <PurchasesPage />
+    case 'accounting':   return <AccountingPage />
+    case 'reports':      return <ReportsPage />
+    case 'settings':     return <SettingsPage />
+    default:             return <DashboardPage />
   }
 }
 
