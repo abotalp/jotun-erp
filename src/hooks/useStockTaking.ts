@@ -1,6 +1,5 @@
 import { useState, useEffect } from 'react'
 import { db } from '@/lib/supabase'
-import { useAppStore } from '@/store/useAppStore'
 
 export function useStockSearch(search: string, categoryId: string) {
   const [data, setData] = useState<any[]>([])
@@ -14,6 +13,7 @@ export function useStockSearch(search: string, categoryId: string) {
     }
 
     setLoading(true)
+
     let query = db.product_variants()
       .select(`
         id, size_name, sku, barcode, cost_price, sale_price, min_stock,
@@ -23,28 +23,33 @@ export function useStockSearch(search: string, categoryId: string) {
       .eq('is_active', true)
       .eq('product.is_active', true)
       .order('sku')
-      .limit(100)
+      .limit(200)
 
-    if (search.length >= 1) {
-      query = query.or(`sku.ilike.%${search}%,barcode.eq.${search}`)
-    }
     if (categoryId) {
       query = query.eq('product.category_id', categoryId)
     }
 
     query.then(({ data: variants, error }) => {
-      if (error) { console.error(error); setLoading(false); return }
+      if (error) {
+        console.error(error)
+        setLoading(false)
+        return
+      }
 
       let result = (variants ?? []) as any[]
 
       if (search.length >= 1) {
-        const term = search.toLowerCase()
-        result = result.filter((v: any) =>
-          v.sku?.toLowerCase().includes(term) ||
-          v.barcode === search ||
-          v.product?.name?.toLowerCase().includes(term) ||
-          v.size_name?.toLowerCase().includes(term)
-        )
+        const term = search.toLowerCase().trim()
+        result = result.filter((v: any) => {
+          const name = v.product?.name?.toLowerCase() ?? ''
+          const sku = v.sku?.toLowerCase() ?? ''
+          const size = v.size_name?.toLowerCase() ?? ''
+          const barcode = v.barcode ?? ''
+          return name.includes(term) ||
+                 sku.includes(term) ||
+                 size.includes(term) ||
+                 barcode === search
+        })
       }
 
       setData(result)
@@ -64,7 +69,6 @@ export async function updateStock(
   userId?: string
 ) {
   try {
-    // Check if inventory record exists
     const { data: existing } = await db.inventory()
       .select('id')
       .eq('variant_id', variantId)
@@ -72,13 +76,11 @@ export async function updateStock(
       .maybeSingle()
 
     if (existing) {
-      // Update existing
       const { error } = await db.inventory()
         .update({ quantity: newQuantity, last_updated: new Date().toISOString() })
         .eq('id', existing.id)
       if (error) throw error
     } else {
-      // Insert new
       const { error } = await db.inventory()
         .insert({
           variant_id: variantId,
@@ -89,7 +91,6 @@ export async function updateStock(
       if (error) throw error
     }
 
-    // Log movement
     const diff = newQuantity - oldQuantity
     if (diff !== 0) {
       await db.inventory_movements().insert({
