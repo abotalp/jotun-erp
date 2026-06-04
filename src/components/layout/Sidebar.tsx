@@ -3,25 +3,26 @@ import { useAppStore } from '@/store/useAppStore'
 import { useAuth } from '@/hooks/useAuth'
 import {
   LayoutDashboard, ShoppingCart, Package, Palette, Users,
-  HardHat, Warehouse, ShoppingBag, FileText, Calculator,
+  HardHat, Warehouse, ShoppingBag, FileText, Calculator, PieChart,
   BarChart3, Settings, LogOut, ChevronRight, Truck, ClipboardList
 } from 'lucide-react'
 
 const NAV_ITEMS = [
-  { key: 'dashboard',    icon: LayoutDashboard, label: 'لوحة التحكم',  roles: ['admin','manager','cashier','warehouse'] },
-  { key: 'pos',          icon: ShoppingCart,    label: 'الكاشير',        roles: ['admin','manager','cashier'] },
-  { key: 'sales',        icon: FileText,        label: 'المبيعات',       roles: ['admin','manager','cashier'] },
-  { key: 'products',     icon: Package,         label: 'المنتجات',       roles: ['admin','manager','warehouse'] },
-  { key: 'colors',       icon: Palette,         label: 'نظام الألوان',   roles: ['admin','manager','cashier'] },
-  { key: 'customers',    icon: Users,           label: 'العملاء',        roles: ['admin','manager','cashier'] },
-  { key: 'contractors',  icon: HardHat,         label: 'المقاولون',      roles: ['admin','manager'] },
-  { key: 'stock-taking', icon: ClipboardList,   label: 'جرد سريع',       roles: ['admin','manager','warehouse'] },
-  { key: 'inventory',    icon: Warehouse,       label: 'المخزون',        roles: ['admin','manager','warehouse'] },
-  { key: 'purchases',    icon: ShoppingBag,     label: 'المشتريات',      roles: ['admin','manager','warehouse'] },
-  { key: 'suppliers',    icon: Truck,           label: 'الموردون',       roles: ['admin','manager'] },
-  { key: 'accounting',   icon: Calculator,      label: 'الحسابات',       roles: ['admin','manager'] },
-  { key: 'reports',      icon: BarChart3,       label: 'التقارير',       roles: ['admin','manager'] },
-  { key: 'settings',     icon: Settings,        label: 'الإعدادات',      roles: ['admin'] },
+  { key: 'dashboard',    icon: LayoutDashboard, label: 'لوحة التحكم',     roles: ['admin','manager','cashier','warehouse'] },
+  { key: 'pos',          icon: ShoppingCart,    label: 'الكاشير',          roles: ['admin','manager','cashier'] },
+  { key: 'sales',        icon: FileText,        label: 'المبيعات',         roles: ['admin','manager','cashier'] },
+  { key: 'products',     icon: Package,         label: 'المنتجات',         roles: ['admin','manager','warehouse'] },
+  { key: 'colors',       icon: Palette,         label: 'نظام الألوان',     roles: ['admin','manager','cashier'] },
+  { key: 'customers',    icon: Users,           label: 'العملاء',          roles: ['admin','manager','cashier'] },
+  { key: 'contractors',  icon: HardHat,         label: 'المقاولون',        roles: ['admin','manager'] },
+  { key: 'stock-taking', icon: ClipboardList,   label: 'جرد سريع',         roles: ['admin','manager','warehouse'] },
+  { key: 'inventory',    icon: Warehouse,       label: 'المخزون',          roles: ['admin','manager','warehouse'] },
+  { key: 'purchases',    icon: ShoppingBag,     label: 'المشتريات',        roles: ['admin','manager','warehouse'] },
+  { key: 'suppliers',    icon: Truck,           label: 'الموردون',         roles: ['admin','manager'] },
+  { key: 'accounting',   icon: Calculator,      label: 'الحسابات',         roles: ['admin','manager'] },
+  { key: 'profit-loss',  icon: PieChart,        label: 'الأرباح والخسائر', roles: ['admin','manager'] },
+  { key: 'reports',      icon: BarChart3,       label: 'التقارير',         roles: ['admin','manager'] },
+  { key: 'settings',     icon: Settings,        label: 'الإعدادات',        roles: ['admin'] },
 ]
 
 export default function Sidebar() {
