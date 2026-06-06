@@ -20,9 +20,7 @@ export function useCustomersList(search: string, typeFilter: string) {
         `name.ilike.%${search}%,phone.ilike.%${search}%,mobile.ilike.%${search}%,code.ilike.%${search}%`
       )
     }
-    if (typeFilter) {
-      query = query.eq('customer_type', typeFilter)
-    }
+    if (typeFilter) query = query.eq('customer_type', typeFilter)
 
     query.then(({ data, error }) => {
       if (!error && data) setData(data as Customer[])
@@ -33,29 +31,29 @@ export function useCustomersList(search: string, typeFilter: string) {
   return { data, loading, refresh: () => setRefreshKey(k => k + 1) }
 }
 
-// 🆕 جلب فواتير العميل بالتفاصيل
+// ✅ إصلاح: جلب الفواتير مباشرة من sales مع كل البنود
 export function useCustomerInvoices(customerId: string | null) {
   const [data, setData] = useState<any[]>([])
   const [loading, setLoading] = useState(false)
 
   useEffect(() => {
-    if (!customerId) {
-      setData([])
-      return
-    }
+    if (!customerId) { setData([]); return }
     setLoading(true)
+
     db.sales()
       .select(`
-        *,
+        id, invoice_no, date, total, paid, remaining, status,
+        is_tax_invoice, subtotal, discount_amount, tax_rate, tax_amount,
+        payment_method,
         items:sale_items(
-          id, product_name, size_name, quantity, unit_price, total, cost_price, profit,
+          id, product_name, size_name, quantity, unit_price, total,
           color:sale_item_colors(color_code, color_name, hex_value)
-        ),
-        payments:sale_payments(*)
+        )
       `)
       .eq('customer_id', customerId)
       .order('date', { ascending: false })
       .then(({ data, error }) => {
+        if (error) console.error('Invoices error:', error)
         if (!error && data) setData(data)
         setLoading(false)
       })
@@ -64,23 +62,44 @@ export function useCustomerInvoices(customerId: string | null) {
   return { data, loading }
 }
 
-// 🆕 جلب مدفوعات العميل
+// ✅ إصلاح: جلب المدفوعات من sale_payments عبر العلاقة بـ sales
 export function useCustomerPayments(customerId: string | null) {
   const [data, setData] = useState<any[]>([])
   const [loading, setLoading] = useState(false)
 
   useEffect(() => {
-    if (!customerId) {
-      setData([])
-      return
-    }
+    if (!customerId) { setData([]); return }
     setLoading(true)
-    db.sale_payments()
-      .select(`*, sale:sales!inner(invoice_no, customer_id)`)
-      .eq('sale.customer_id', customerId)
-      .order('date', { ascending: false })
-      .then(({ data, error }) => {
-        if (!error && data) setData(data)
+
+    // أولاً نجلب IDs الفواتير للعميل
+    db.sales()
+      .select('id, invoice_no')
+      .eq('customer_id', customerId)
+      .then(async ({ data: salesData, error: salesErr }) => {
+        if (salesErr || !salesData || salesData.length === 0) {
+          setData([])
+          setLoading(false)
+          return
+        }
+
+        const saleIds = salesData.map((s: any) => s.id)
+        const salesMap: Record<string, string> = {}
+        salesData.forEach((s: any) => { salesMap[s.id] = s.invoice_no })
+
+        // ثم نجلب الدفعات لهذه الفواتير
+        const { data: paymentsData, error: payErr } = await db.sale_payments()
+          .select('*')
+          .in('sale_id', saleIds)
+          .order('date', { ascending: false })
+
+        if (payErr) console.error('Payments error:', payErr)
+
+        const enriched = (paymentsData ?? []).map((p: any) => ({
+          ...p,
+          invoice_no: salesMap[p.sale_id] ?? '-'
+        }))
+
+        setData(enriched)
         setLoading(false)
       })
   }, [customerId])
@@ -88,62 +107,128 @@ export function useCustomerPayments(customerId: string | null) {
   return { data, loading }
 }
 
-// 🆕 كشف الحساب الكامل (Ledger)
+// ✅ إصلاح: كشف الحساب يُبنى من sales + sale_payments مباشرة (ليس من customer_transactions)
 export function useCustomerLedger(customerId: string | null) {
   const [data, setData] = useState<any[]>([])
   const [loading, setLoading] = useState(false)
 
   useEffect(() => {
-    if (!customerId) {
-      setData([])
-      return
-    }
+    if (!customerId) { setData([]); return }
     setLoading(true)
-    db.customer_transactions()
-      .select('*')
-      .eq('customer_id', customerId)
-      .order('date', { ascending: true })
-      .then(({ data, error }) => {
-        if (!error && data) {
-          // حساب الرصيد التراكمي
-          let runningBalance = 0
-          const ledger = data.map((t: any) => {
-            runningBalance += (t.amount ?? 0)
-            return {
-              ...t,
-              debit: t.amount > 0 ? t.amount : 0,
-              credit: t.amount < 0 ? Math.abs(t.amount) : 0,
-              balance: runningBalance
-            }
-          })
-          // اعرض الأحدث أولاً
-          setData(ledger.reverse())
+
+    Promise.all([
+      db.sales()
+        .select('id, invoice_no, date, total, status')
+        .eq('customer_id', customerId)
+        .order('date', { ascending: true }),
+      (async () => {
+        const { data: sales } = await db.sales()
+          .select('id, invoice_no')
+          .eq('customer_id', customerId)
+        if (!sales || sales.length === 0) return { data: [], error: null }
+        const saleIds = sales.map((s: any) => s.id)
+        const salesMap: Record<string, string> = {}
+        sales.forEach((s: any) => { salesMap[s.id] = s.invoice_no })
+        const { data: payments } = await db.sale_payments()
+          .select('*')
+          .in('sale_id', saleIds)
+          .order('date', { ascending: true })
+        return {
+          data: (payments ?? []).map((p: any) => ({ ...p, invoice_no: salesMap[p.sale_id] ?? '-' })),
+          error: null
         }
-        setLoading(false)
+      })(),
+      db.sale_returns()
+        .select(`id, return_no, sale_id, date, total_amount, sale:sales!inner(customer_id, invoice_no)`)
+        .eq('sale.customer_id', customerId)
+    ]).then(([salesRes, paymentsRes, returnsRes]) => {
+      const sales = salesRes.data ?? []
+      const payments = paymentsRes.data ?? []
+      const returns = returnsRes.data ?? []
+
+      // بناء قائمة الحركات
+      const transactions: any[] = []
+
+      sales.forEach((s: any) => {
+        if (s.status !== 'cancelled') {
+          transactions.push({
+            id: `sale-${s.id}`,
+            date: s.date,
+            type: 'sale',
+            reference_no: s.invoice_no,
+            debit: s.total,
+            credit: 0,
+            description: 'فاتورة بيع'
+          })
+        }
       })
+
+      payments.forEach((p: any) => {
+        transactions.push({
+          id: `payment-${p.id}`,
+          date: p.date,
+          type: 'payment',
+          reference_no: p.invoice_no,
+          debit: 0,
+          credit: p.amount,
+          description: `دفعة - ${p.payment_method === 'cash' ? 'نقدي' : p.payment_method}`
+        })
+      })
+
+      returns.forEach((r: any) => {
+        transactions.push({
+          id: `return-${r.id}`,
+          date: r.date,
+          type: 'return',
+          reference_no: r.return_no,
+          debit: 0,
+          credit: r.total_amount,
+          description: `مرتجع - فاتورة ${r.sale?.invoice_no}`
+        })
+      })
+
+      // ترتيب زمني تصاعدي لحساب الرصيد
+      transactions.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
+
+      let runningBalance = 0
+      const ledger = transactions.map(t => {
+        runningBalance += t.debit - t.credit
+        return { ...t, balance: runningBalance }
+      })
+
+      // عرض الأحدث أولاً
+      setData(ledger.reverse())
+      setLoading(false)
+    })
   }, [customerId])
 
   return { data, loading }
 }
 
-// 🆕 إحصائيات العميل
+// ✅ إصلاح: الإحصائيات تعتمد على sales و sale_payments مباشرة
 export function useCustomerStats(customerId: string | null) {
   const [stats, setStats] = useState<any>(null)
   const [loading, setLoading] = useState(false)
 
   useEffect(() => {
-    if (!customerId) {
-      setStats(null)
-      return
-    }
+    if (!customerId) { setStats(null); return }
     setLoading(true)
 
     Promise.all([
-      db.sales().select('id, total, paid, date').eq('customer_id', customerId).eq('status', 'completed'),
-      db.sale_payments().select('amount, date, sale:sales!inner(customer_id)').eq('sale.customer_id', customerId)
-    ]).then(([salesRes, paymentsRes]) => {
-      const sales = salesRes.data ?? []
-      const payments = paymentsRes.data ?? []
+      db.sales()
+        .select('id, total, paid, date, status')
+        .eq('customer_id', customerId),
+      (async () => {
+        const { data: sales } = await db.sales().select('id').eq('customer_id', customerId)
+        if (!sales || sales.length === 0) return []
+        const saleIds = sales.map((s: any) => s.id)
+        const { data } = await db.sale_payments()
+          .select('amount, date')
+          .in('sale_id', saleIds)
+        return data ?? []
+      })()
+    ]).then(([salesRes, payments]) => {
+      const sales = (salesRes.data ?? []).filter((s: any) => s.status === 'completed')
 
       const totalSales = sales.reduce((s: number, x: any) => s + (x.total ?? 0), 0)
       const totalPaid = payments.reduce((s: number, x: any) => s + (x.amount ?? 0), 0)
@@ -176,10 +261,7 @@ export function useCustomerColorHistory(customerId: string | null) {
   const [loading, setLoading] = useState(false)
 
   useEffect(() => {
-    if (!customerId) {
-      setData([])
-      return
-    }
+    if (!customerId) { setData([]); return }
     setLoading(true)
     db.customer_color_history()
       .select(`
@@ -203,7 +285,6 @@ export async function createCustomer(data: Partial<Customer>) {
   try {
     const { count } = await db.customers().select('id', { count: 'exact', head: true })
     const code = `CUS-${String((count ?? 0) + 1).padStart(5, '0')}`
-
     const { error } = await db.customers().insert({ ...data, code, is_active: true })
     if (error) throw error
     return { success: true }
@@ -234,7 +315,6 @@ export async function deleteCustomer(id: string) {
   }
 }
 
-// 🆕 جلب فاتورة كاملة لإعادة الطباعة
 export async function getInvoiceForReprint(saleId: string) {
   try {
     const { data: sale, error } = await db.sales()
