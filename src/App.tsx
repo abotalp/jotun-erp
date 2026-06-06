@@ -1,29 +1,28 @@
-import React from 'react'
+import React, { lazy, Suspense } from 'react'
 import { useAuth } from '@/hooks/useAuth'
 import { useAppStore } from '@/store/useAppStore'
 import LoginPage from '@/pages/LoginPage'
 import AppLayout from '@/components/layout/AppLayout'
 import DashboardPage from '@/pages/DashboardPage'
-import POSPage from '@/pages/POSPage'
-import ProductsPage from '@/pages/ProductsPage'
-import CustomersPage from '@/pages/CustomersPage'
-import SalesPage from '@/pages/SalesPage'
-import ColorsPage from '@/pages/ColorsPage'
-import ContractorsPage from '@/pages/ContractorsPage'
-import InventoryPage from '@/pages/InventoryPage'
-import StockTakingPage from '@/pages/StockTakingPage'
-import SuppliersPage from '@/pages/SuppliersPage'
-import PurchasesPage from '@/pages/PurchasesPage'
-import AccountingPage from '@/pages/AccountingPage'
-import ProfitLossPage from '@/pages/ProfitLossPage'
-import ReportsPage from '@/pages/ReportsPage'
-import SettingsPage from '@/pages/SettingsPage'
 
-export default function App() {
-  const { user, loading } = useAuth()
-  const { activeModule } = useAppStore()
+// تحميل كسول لكل صفحة (تُحمّل عند الحاجة فقط)
+const POSPage          = lazy(() => import('@/pages/POSPage'))
+const ProductsPage     = lazy(() => import('@/pages/ProductsPage'))
+const CustomersPage    = lazy(() => import('@/pages/CustomersPage'))
+const SalesPage        = lazy(() => import('@/pages/SalesPage'))
+const ColorsPage       = lazy(() => import('@/pages/ColorsPage'))
+const ContractorsPage  = lazy(() => import('@/pages/ContractorsPage'))
+const InventoryPage    = lazy(() => import('@/pages/InventoryPage'))
+const StockTakingPage  = lazy(() => import('@/pages/StockTakingPage'))
+const SuppliersPage    = lazy(() => import('@/pages/SuppliersPage'))
+const PurchasesPage    = lazy(() => import('@/pages/PurchasesPage'))
+const AccountingPage   = lazy(() => import('@/pages/AccountingPage'))
+const ProfitLossPage   = lazy(() => import('@/pages/ProfitLossPage'))
+const ReportsPage      = lazy(() => import('@/pages/ReportsPage'))
+const SettingsPage     = lazy(() => import('@/pages/SettingsPage'))
 
-  if (loading) return (
+function LoadingScreen() {
+  return (
     <div className="min-h-screen bg-[#1B2E4B] flex items-center justify-center" dir="rtl">
       <div className="text-center">
         <div className="text-7xl mb-4 animate-pulse">🎨</div>
@@ -31,7 +30,24 @@ export default function App() {
       </div>
     </div>
   )
+}
 
+function PageLoader() {
+  return (
+    <div className="flex items-center justify-center py-20" dir="rtl">
+      <div className="text-center">
+        <div className="text-3xl mb-2 animate-pulse">⏳</div>
+        <p className="text-gray-500 text-sm">جاري تحميل الصفحة...</p>
+      </div>
+    </div>
+  )
+}
+
+export default function App() {
+  const { user, loading } = useAuth()
+  const { activeModule } = useAppStore()
+
+  if (loading) return <LoadingScreen />
   if (!user) return <LoginPage />
 
   const renderPage = () => {
@@ -57,7 +73,9 @@ export default function App() {
 
   return (
     <AppLayout>
-      {renderPage()}
+      <Suspense fallback={<PageLoader />}>
+        {renderPage()}
+      </Suspense>
     </AppLayout>
   )
 }
