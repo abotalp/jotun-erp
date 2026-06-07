@@ -1,0 +1,441 @@
+import React, { useState, useEffect } from 'react'
+import {
+  useOpenInvoices, getOpenInvoice,
+  addItemToOpenInvoice, removeItemFromOpenInvoice,
+  addPaymentToInvoice, closeOpenInvoice, createOpenInvoice
+} from '@/hooks/useOpenInvoices'
+import { useAppStore } from '@/store/useAppStore'
+import { db } from '@/lib/supabase'
+import { formatCurrency, formatDate, formatDateTime } from '@/lib/utils'
+import {
+  Plus, Search, X, FileText, Eye, ShoppingCart,
+  CheckCircle, AlertCircle, Trash2, DollarSign, Lock
+} from 'lucide-react'
+
+// Modal: تفاصيل وإدارة الفاتورة المفتوحة
+function OpenInvoiceDetailModal({ saleId, onClose, onChange }: any) {
+  const { user, activeWarehouse } = useAppStore()
+  const [invoice, setInvoice] = useState<any>(null)
+  const [loading, setLoading] = useState(true)
+  const [tab, setTab] = useState<'items' | 'add-item' | 'payment'>('items')
+
+  // إضافة منتج
+  const [search, setSearch] = useState('')
+  const [variants, setVariants] = useState<any[]>([])
+  const [selectedVariant, setSelectedVariant] = useState<any>(null)
+  const [qty, setQty] = useState(1)
+  const [price, setPrice] = useState(0)
+
+  // دفعة
+  const [payAmount, setPayAmount] = useState(0)
+  const [payMethod, setPayMethod] = useState('cash')
+  const [payNotes, setPayNotes] = useState('')
+
+  useEffect(() => { load() }, [saleId])
+  useEffect(() => {
+    if (search.length < 2) { setVariants([]); return }
+    db.product_variants()
+      .select(`id, size_name, sku, barcode, cost_price, sale_price, product:products!inner(id, name, is_active)`)
+      .eq('is_active', true).eq('product.is_active', true).limit(30)
+      .then(({ data }) => {
+        if (!data) return
+        const term = search.toLowerCase()
+        setVariants(data.filter((v: any) =>
+          v.product?.name?.toLowerCase().includes(term) ||
+          v.sku?.toLowerCase().includes(term) ||
+          v.barcode === search
+        ))
+      })
+  }, [search])
+
+  async function load() {
+    setLoading(true)
+    const r = await getOpenInvoice(saleId)
+    if (r.success) setInvoice(r.invoice)
+    setLoading(false)
+  }
+
+  async function handleAddItem() {
+    if (!selectedVariant || qty <= 0 || price <= 0) {
+      alert('املأ كل البيانات'); return
+    }
+    if (!activeWarehouse?.id) { alert('لا يوجد مخزن'); return }
+
+    const r = await addItemToOpenInvoice(
+      saleId,
+      {
+        variantId: selectedVariant.id,
+        productName: selectedVariant.product.name,
+        sizeName: selectedVariant.size_name,
+        quantity: qty,
+        unitPrice: price,
+        costPrice: selectedVariant.cost_price
+      },
+      activeWarehouse.id,
+      user?.id
+    )
+    if (r.success) {
+      setSelectedVariant(null); setQty(1); setPrice(0); setSearch('')
+      load(); onChange?.()
+    } else alert(r.error)
+  }
+
+  async function handleRemoveItem(itemId: string) {
+    if (!confirm('حذف هذا الصنف؟')) return
+    if (!activeWarehouse?.id) return
+    const r = await removeItemFromOpenInvoice(itemId, activeWarehouse.id, user?.id)
+    if (r.success) { load(); onChange?.() }
+    else alert(r.error)
+  }
+
+  async function handlePay() {
+    if (payAmount <= 0) { alert('أدخل مبلغ صحيح'); return }
+    const r = await addPaymentToInvoice(saleId, payAmount, payMethod, payNotes, user?.id)
+    if (r.success) {
+      alert(`✅ تم دفع ${formatCurrency(payAmount)}`)
+      setPayAmount(0); setPayNotes('')
+      load(); onChange?.()
+    } else alert(r.error)
+  }
+
+  async function handleClose() {
+    if (!confirm('إغلاق الفاتورة نهائياً؟ لن يمكن تعديلها بعد ذلك.')) return
+    const r = await closeOpenInvoice(saleId)
+    if (r.success) {
+      alert('✅ تم إغلاق الفاتورة')
+      onChange?.(); onClose()
+    } else alert(r.error)
+  }
+
+  if (loading || !invoice) {
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}>
+        <div className="bg-white rounded-2xl p-12 text-center">⏳ جاري التحميل...</div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-start justify-center p-2 sm:p-4 overflow-y-auto" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }} onClick={onClose} dir="rtl">
+      <div onClick={e => e.stopPropagation()} className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl my-4">
+
+        <div className="text-white p-5 rounded-t-2xl" style={{ background: 'linear-gradient(to left, #F59E0B, #D97706)' }}>
+          <div className="flex items-start justify-between mb-4">
+            <div>
+              <h3 className="text-xl font-black font-mono">{invoice.invoice_no}</h3>
+              <p className="text-amber-200 text-sm mt-1">
+                🟡 فاتورة مفتوحة | {invoice.customer?.name}
+              </p>
+              <p className="text-amber-100 text-xs mt-1">{formatDateTime(invoice.date)}</p>
+            </div>
+            <button onClick={onClose} className="text-white/60 hover:text-white"><X size={22} /></button>
+          </div>
+
+          <div className="grid grid-cols-3 gap-2">
+            <div className="bg-white/10 rounded-xl p-3 text-center">
+              <p className="text-lg font-black">{formatCurrency(invoice.total)}</p>
+              <p className="text-[10px] text-amber-200">الإجمالي</p>
+            </div>
+            <div className="bg-green-500/30 rounded-xl p-3 text-center">
+              <p className="text-lg font-black">{formatCurrency(invoice.paid)}</p>
+              <p className="text-[10px] text-amber-200">المدفوع</p>
+            </div>
+            <div className={`rounded-xl p-3 text-center ${invoice.remaining > 0 ? 'bg-red-500/30' : 'bg-white/10'}`}>
+              <p className="text-lg font-black">{formatCurrency(invoice.remaining)}</p>
+              <p className="text-[10px] text-amber-200">المتبقي</p>
+            </div>
+          </div>
+        </div>
+
+        <div className="flex border-b bg-gray-50">
+          <button onClick={() => setTab('items')} className={`flex-1 py-3 text-sm font-bold ${tab === 'items' ? 'bg-white border-b-2 border-amber-500 text-amber-600' : 'text-gray-500'}`}>
+            📦 الأصناف ({invoice.items?.length ?? 0})
+          </button>
+          <button onClick={() => setTab('add-item')} className={`flex-1 py-3 text-sm font-bold ${tab === 'add-item' ? 'bg-white border-b-2 border-amber-500 text-amber-600' : 'text-gray-500'}`}>
+            ➕ إضافة صنف
+          </button>
+          <button onClick={() => setTab('payment')} className={`flex-1 py-3 text-sm font-bold ${tab === 'payment' ? 'bg-white border-b-2 border-green-500 text-green-600' : 'text-gray-500'}`}>
+            💰 دفعة
+          </button>
+        </div>
+
+        <div className="max-h-[55vh] overflow-y-auto p-4">
+          {tab === 'items' && (
+            <div className="space-y-2">
+              {(invoice.items ?? []).length === 0 ? (
+                <div className="text-center py-12 text-gray-400">
+                  <p className="text-4xl mb-2">📦</p>
+                  <p>لا توجد أصناف. اضغط "إضافة صنف" لإضافة منتج.</p>
+                </div>
+              ) : (invoice.items as any[]).map((item: any) => (
+                <div key={item.id} className="bg-gray-50 rounded-xl p-3 flex items-start justify-between">
+                  <div className="flex-1">
+                    <p className="text-sm font-bold">{item.product_name}</p>
+                    <p className="text-xs text-gray-500">{item.size_name}</p>
+                    <p className="text-xs text-gray-600 mt-1">
+                      {item.quantity} × {formatCurrency(item.unit_price)} =
+                      <span className="font-bold text-amber-600"> {formatCurrency(item.total)}</span>
+                    </p>
+                  </div>
+                  <button onClick={() => handleRemoveItem(item.id)} className="text-red-500 hover:bg-red-50 p-1.5 rounded-lg">
+                    <Trash2 size={14} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {tab === 'add-item' && (
+            <div className="space-y-3">
+              {!selectedVariant ? (
+                <>
+                  <input value={search} onChange={e => setSearch(e.target.value)} placeholder="🔍 ابحث عن منتج..." className="w-full px-3 py-2.5 border-2 rounded-xl text-sm outline-none focus:border-amber-400" autoFocus />
+                  <div className="max-h-64 overflow-y-auto space-y-1">
+                    {variants.map((v: any) => (
+                      <button key={v.id} onClick={() => { setSelectedVariant(v); setPrice(v.sale_price) }} className="w-full p-3 bg-gray-50 hover:bg-amber-50 rounded-xl text-right">
+                        <p className="text-sm font-bold">{v.product.name}</p>
+                        <p className="text-xs text-gray-500">{v.size_name} | {formatCurrency(v.sale_price)}</p>
+                      </button>
+                    ))}
+                  </div>
+                </>
+              ) : (
+                <div className="space-y-3 bg-amber-50 p-4 rounded-xl">
+                  <div className="flex justify-between items-start">
+                    <div>
+                      <p className="font-bold">{selectedVariant.product.name}</p>
+                      <p className="text-xs text-gray-500">{selectedVariant.size_name}</p>
+                    </div>
+                    <button onClick={() => setSelectedVariant(null)} className="text-red-500"><X size={18} /></button>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs font-bold mb-1">الكمية</label>
+                      <input type="number" value={qty} onChange={e => setQty(+e.target.value || 1)} min={1} className="w-full px-3 py-2 border-2 rounded-lg text-center" />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold mb-1">السعر</label>
+                      <input type="number" value={price} onChange={e => setPrice(+e.target.value || 0)} step="0.01" className="w-full px-3 py-2 border-2 rounded-lg text-center" />
+                    </div>
+                  </div>
+                  <div className="bg-white rounded-lg p-2 text-center">
+                    <p className="text-xs text-gray-500">الإجمالي</p>
+                    <p className="text-lg font-black text-amber-600">{formatCurrency(qty * price)}</p>
+                  </div>
+                  <button onClick={handleAddItem} className="w-full py-2.5 bg-amber-500 text-white rounded-xl font-bold hover:opacity-90">
+                    ➕ إضافة للفاتورة
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+
+          {tab === 'payment' && (
+            <div className="space-y-3">
+              <div className="bg-blue-50 rounded-xl p-3 text-center">
+                <p className="text-xs text-gray-500">المتبقي على الفاتورة</p>
+                <p className="text-2xl font-black text-red-600">{formatCurrency(invoice.remaining)}</p>
+              </div>
+              <div>
+                <label className="block text-sm font-bold mb-1">المبلغ المراد سداده</label>
+                <input type="number" value={payAmount || ''} onChange={e => setPayAmount(+e.target.value || 0)} className="w-full px-3 py-3 border-2 rounded-xl text-2xl font-black text-center outline-none focus:border-green-400" autoFocus />
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <button onClick={() => setPayAmount(invoice.remaining)} className="py-2 bg-blue-50 text-blue-700 rounded-lg text-sm font-bold hover:bg-blue-100">
+                  دفع كامل المتبقي
+                </button>
+                <button onClick={() => setPayAmount(invoice.remaining / 2)} className="py-2 bg-gray-50 text-gray-700 rounded-lg text-sm font-bold hover:bg-gray-100">
+                  دفع نصف المتبقي
+                </button>
+              </div>
+              <div>
+                <label className="block text-sm font-bold mb-1">طريقة الدفع</label>
+                <select value={payMethod} onChange={e => setPayMethod(e.target.value)} className="w-full px-3 py-2.5 border-2 rounded-xl text-sm bg-white">
+                  <option value="cash">نقدي</option>
+                  <option value="bank_transfer">تحويل بنكي</option>
+                  <option value="visa">فيزا</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-bold mb-1">ملاحظات</label>
+                <input value={payNotes} onChange={e => setPayNotes(e.target.value)} className="w-full px-3 py-2.5 border-2 rounded-xl text-sm" />
+              </div>
+              <button onClick={handlePay} disabled={payAmount <= 0} className="w-full py-3 bg-green-600 text-white rounded-xl font-black hover:opacity-90 disabled:opacity-50">
+                💰 تسجيل الدفعة
+              </button>
+            </div>
+          )}
+        </div>
+
+        <div className="p-4 border-t flex gap-2">
+          <button onClick={onClose} className="flex-1 py-2.5 border-2 rounded-xl font-bold hover:bg-gray-50">
+            إغلاق النافذة
+          </button>
+          <button onClick={handleClose} disabled={(invoice.items?.length ?? 0) === 0} className="flex-1 py-2.5 bg-red-600 text-white rounded-xl font-black hover:opacity-90 disabled:opacity-50">
+            <Lock size={14} className="inline ml-1" /> إنهاء وإغلاق الفاتورة
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// Modal: إنشاء فاتورة مفتوحة جديدة
+function NewOpenInvoiceModal({ onClose, onCreated }: any) {
+  const { user, activeWarehouse } = useAppStore()
+  const [customers, setCustomers] = useState<any[]>([])
+  const [search, setSearch] = useState('')
+  const [creating, setCreating] = useState(false)
+
+  useEffect(() => {
+    let q = db.customers().select('id, code, name, phone, customer_type, current_balance').eq('is_active', true).order('name').limit(30)
+    if (search.length >= 1) q = q.or(`name.ilike.%${search}%,phone.ilike.%${search}%`)
+    q.then(({ data }) => setCustomers(data ?? []))
+  }, [search])
+
+  async function handleCreate(customerId: string) {
+    if (!activeWarehouse?.id) { alert('لا يوجد مخزن'); return }
+    setCreating(true)
+    const r = await createOpenInvoice(customerId, activeWarehouse.id, user?.id)
+    setCreating(false)
+    if (r.success) {
+      alert(`✅ تم إنشاء فاتورة مفتوحة: ${r.sale.invoice_no}`)
+      onCreated?.(r.sale.id)
+      onClose()
+    } else alert(r.error)
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }} onClick={onClose} dir="rtl">
+      <div onClick={e => e.stopPropagation()} className="bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[80vh] flex flex-col">
+        <div className="flex items-center justify-between p-4 border-b">
+          <h3 className="text-lg font-black">➕ فاتورة مفتوحة جديدة</h3>
+          <button onClick={onClose}><X size={20} className="text-gray-400" /></button>
+        </div>
+        <div className="p-3 border-b">
+          <input value={search} onChange={e => setSearch(e.target.value)} placeholder="🔍 ابحث عن عميل..." className="w-full px-3 py-2 border-2 rounded-lg text-sm" />
+        </div>
+        <div className="flex-1 overflow-y-auto p-3 space-y-1">
+          {customers.map((c: any) => (
+            <button key={c.id} onClick={() => handleCreate(c.id)} disabled={creating} className="w-full p-3 bg-gray-50 hover:bg-amber-50 rounded-xl text-right">
+              <p className="text-sm font-bold">{c.name}</p>
+              <p className="text-xs text-gray-500">{c.code} | الرصيد: {formatCurrency(Math.abs(c.current_balance))}{c.current_balance > 0 ? ' (مديونية)' : ''}</p>
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// الصفحة الرئيسية
+export default function OpenInvoicesPage() {
+  const [showNew, setShowNew] = useState(false)
+  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [search, setSearch] = useState('')
+  const { data: invoices, loading, refresh } = useOpenInvoices()
+
+  const filtered = invoices.filter((inv: any) => {
+    if (!search) return true
+    const term = search.toLowerCase()
+    return inv.invoice_no?.toLowerCase().includes(term) ||
+           (inv.customer as any)?.name?.toLowerCase().includes(term)
+  })
+
+  const totalOpen = invoices.reduce((s, i: any) => s + (i.remaining ?? 0), 0)
+  const totalAmount = invoices.reduce((s, i: any) => s + (i.total ?? 0), 0)
+
+  return (
+    <div className="space-y-4" dir="rtl">
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-black text-gray-900">📂 الفواتير المفتوحة</h1>
+          <p className="text-sm text-gray-500 mt-0.5">{invoices.length} فاتورة مفتوحة</p>
+        </div>
+        <button onClick={() => setShowNew(true)} className="flex items-center gap-2 px-4 py-2 text-white rounded-xl text-sm font-bold shadow-lg" style={{ background: 'linear-gradient(to left, #F59E0B, #D97706)' }}>
+          <Plus size={16} /> فاتورة جديدة
+        </button>
+      </div>
+
+      <div className="grid grid-cols-3 gap-4">
+        <div className="bg-white rounded-2xl border p-4 flex items-center gap-3">
+          <div className="w-11 h-11 rounded-xl bg-amber-100 flex items-center justify-center">
+            <FileText size={20} className="text-amber-600" />
+          </div>
+          <div>
+            <p className="text-lg font-black text-amber-700">{invoices.length}</p>
+            <p className="text-xs text-gray-500">عدد الفواتير</p>
+          </div>
+        </div>
+        <div className="bg-white rounded-2xl border p-4 flex items-center gap-3">
+          <div className="w-11 h-11 rounded-xl bg-blue-100 flex items-center justify-center">
+            <DollarSign size={20} className="text-blue-600" />
+          </div>
+          <div>
+            <p className="text-lg font-black text-blue-700">{formatCurrency(totalAmount)}</p>
+            <p className="text-xs text-gray-500">إجمالي القيمة</p>
+          </div>
+        </div>
+        <div className="bg-white rounded-2xl border p-4 flex items-center gap-3">
+          <div className="w-11 h-11 rounded-xl bg-red-100 flex items-center justify-center">
+            <AlertCircle size={20} className="text-red-600" />
+          </div>
+          <div>
+            <p className="text-lg font-black text-red-700">{formatCurrency(totalOpen)}</p>
+            <p className="text-xs text-gray-500">المتبقي</p>
+          </div>
+        </div>
+      </div>
+
+      <div className="relative">
+        <Search size={15} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400" />
+        <input value={search} onChange={e => setSearch(e.target.value)} placeholder="بحث برقم الفاتورة أو العميل..." className="w-full pr-9 pl-3 py-2.5 bg-white border-2 rounded-xl text-sm outline-none focus:border-amber-400" />
+      </div>
+
+      <div className="bg-white rounded-2xl border shadow-sm overflow-hidden">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="text-white" style={{ background: 'linear-gradient(to left, #F59E0B, #D97706)' }}>
+              <th className="py-3 px-4 text-right text-xs font-bold">الفاتورة</th>
+              <th className="py-3 px-4 text-right text-xs font-bold">التاريخ</th>
+              <th className="py-3 px-4 text-right text-xs font-bold">العميل</th>
+              <th className="py-3 px-4 text-right text-xs font-bold">الأصناف</th>
+              <th className="py-3 px-4 text-right text-xs font-bold">الإجمالي</th>
+              <th className="py-3 px-4 text-right text-xs font-bold">المدفوع</th>
+              <th className="py-3 px-4 text-right text-xs font-bold">المتبقي</th>
+              <th className="py-3 px-4 text-right text-xs font-bold">إجراءات</th>
+            </tr>
+          </thead>
+          <tbody>
+            {loading ? (
+              <tr><td colSpan={8} className="text-center py-20 text-gray-400">⏳</td></tr>
+            ) : filtered.length === 0 ? (
+              <tr><td colSpan={8} className="text-center py-20">
+                <FileText size={32} className="mx-auto mb-2 text-gray-300" />
+                <p className="text-gray-400">لا توجد فواتير مفتوحة</p>
+              </td></tr>
+            ) : filtered.map((inv: any) => (
+              <tr key={inv.id} className="border-b border-gray-50 hover:bg-amber-50/20">
+                <td className="py-3 px-4 font-mono text-xs font-bold text-amber-700">{inv.invoice_no}</td>
+                <td className="py-3 px-4 text-xs text-gray-500">{formatDate(inv.date)}</td>
+                <td className="py-3 px-4 text-xs font-bold">{(inv.customer as any)?.name ?? '-'}</td>
+                <td className="py-3 px-4 text-xs">{inv.items?.length ?? 0}</td>
+                <td className="py-3 px-4 text-xs font-black" style={{ color: '#D4AF37' }}>{formatCurrency(inv.total)}</td>
+                <td className="py-3 px-4 text-xs font-bold text-green-600">{formatCurrency(inv.paid)}</td>
+                <td className="py-3 px-4 text-xs font-bold text-red-500">{formatCurrency(inv.remaining)}</td>
+                <td className="py-3 px-4">
+                  <button onClick={() => setSelectedId(inv.id)} className="px-3 py-1.5 bg-amber-100 text-amber-700 rounded-lg text-xs font-bold hover:bg-amber-200">
+                    <Eye size={11} className="inline ml-1" /> فتح
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {showNew && <NewOpenInvoiceModal onClose={() => setShowNew(false)} onCreated={(id: string) => { refresh(); setSelectedId(id) }} />}
+      {selectedId && <OpenInvoiceDetailModal saleId={selectedId} onClose={() => setSelectedId(null)} onChange={refresh} />}
+    </div>
+  )
+}
