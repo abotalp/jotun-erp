@@ -1,0 +1,426 @@
+import { useState, useEffect } from 'react'
+import { db, rpc } from '@/lib/supabase'
+
+// ═══ قائمة الفواتير المفتوحة ═══
+export function useOpenInvoices(customerId?: string | null) {
+  const [data, setData] = useState<any[]>([])
+  const [loading, setLoading] = useState(true)
+  const [refreshKey, setRefreshKey] = useState(0)
+
+  useEffect(() => {
+    setLoading(true)
+    let q = db.sales()
+      .select(`
+        id, invoice_no, date, total, paid, remaining, status, customer_id,
+        customer:customers(id, name, phone, customer_type),
+        items:sale_items(id, product_name, size_name, quantity, unit_price, total)
+      `)
+      .eq('status', 'open')
+      .order('date', { ascending: false })
+      .limit(200)
+
+    if (customerId) q = q.eq('customer_id', customerId)
+
+    q.then(({ data, error }) => {
+      if (!error && data) setData(data)
+      setLoading(false)
+    })
+  }, [customerId, refreshKey])
+
+  return { data, loading, refresh: () => setRefreshKey(k => k + 1) }
+}
+
+// ═══ جلب فاتورة مفتوحة واحدة بكل تفاصيلها ═══
+export async function getOpenInvoice(saleId: string) {
+  try {
+    const { data, error } = await db.sales()
+      .select(`
+        *,
+        customer:customers(id, name, phone, customer_type),
+        items:sale_items(
+          id, variant_id, product_name, size_name, quantity, unit_price, total, cost_price,
+          color:sale_item_colors(color_code, color_name)
+        ),
+        payments:sale_payments(*)
+      `)
+      .eq('id', saleId)
+      .single()
+
+    if (error) throw error
+    return { success: true, invoice: data }
+  } catch (e: any) {
+    return { success: false, error: e.message }
+  }
+}
+
+// ═══ إضافة منتج إلى فاتورة مفتوحة ═══
+export async function addItemToOpenInvoice(
+  saleId: string,
+  item: {
+    variantId: string
+    productName: string
+    sizeName: string
+    quantity: number
+    unitPrice: number
+    costPrice: number
+    color?: { colorId: string; colorCode: string; colorName: string }
+  },
+  warehouseId: string,
+  userId?: string
+) {
+  try {
+    // 1. إضافة البند
+    const subtotal = item.quantity * item.unitPrice
+    const profit = subtotal - (item.costPrice * item.quantity)
+
+    const { data: newItem, error: itemErr } = await db.sale_items().insert({
+      sale_id: saleId,
+      variant_id: item.variantId,
+      product_name: item.productName,
+      size_name: item.sizeName,
+      quantity: item.quantity,
+      unit_price: item.unitPrice,
+      original_price: item.unitPrice,
+      subtotal,
+      total: subtotal,
+      cost_price: item.costPrice,
+      profit
+    }).select().single()
+
+    if (itemErr) throw itemErr
+
+    // 2. إضافة اللون إن وجد
+    if (item.color && newItem) {
+      await db.sale_item_colors().insert({
+        sale_item_id: newItem.id,
+        color_id: item.color.colorId,
+        color_code: item.color.colorCode,
+        color_name: item.color.colorName,
+        tinting_fee: 0
+      })
+    }
+
+    // 3. خصم من المخزون
+    const { data: inv } = await db.inventory()
+      .select('id, quantity')
+      .eq('variant_id', item.variantId)
+      .eq('warehouse_id', warehouseId)
+      .single()
+
+    if (inv) {
+      const newQty = Math.max(0, (inv.quantity ?? 0) - item.quantity)
+      await db.inventory().update({
+        quantity: newQty,
+        last_updated: new Date().toISOString()
+      }).eq('id', inv.id)
+
+      await db.inventory_movements().insert({
+        variant_id: item.variantId,
+        warehouse_id: warehouseId,
+        movement_type: 'sale',
+        reference_type: 'open_invoice_add',
+        reference_id: saleId,
+        quantity: -item.quantity,
+        unit_cost: item.costPrice,
+        qty_before: inv.quantity ?? 0,
+        qty_after: newQty,
+        notes: 'إضافة لفاتورة مفتوحة',
+        user_id: userId
+      })
+    }
+
+    // 4. تحديث إجماليات الفاتورة
+    await recalculateOpenInvoice(saleId)
+
+    return { success: true }
+  } catch (e: any) {
+    return { success: false, error: e.message }
+  }
+}
+
+// ═══ حذف بند من فاتورة مفتوحة ═══
+export async function removeItemFromOpenInvoice(itemId: string, warehouseId: string, userId?: string) {
+  try {
+    // جلب بيانات البند
+    const { data: item } = await db.sale_items()
+      .select('sale_id, variant_id, quantity, cost_price')
+      .eq('id', itemId).single()
+
+    if (!item) throw new Error('البند غير موجود')
+
+    // إرجاع المخزون
+    if (item.variant_id) {
+      const { data: inv } = await db.inventory()
+        .select('id, quantity')
+        .eq('variant_id', item.variant_id)
+        .eq('warehouse_id', warehouseId)
+        .single()
+
+      if (inv) {
+        const newQty = (inv.quantity ?? 0) + item.quantity
+        await db.inventory().update({
+          quantity: newQty,
+          last_updated: new Date().toISOString()
+        }).eq('id', inv.id)
+
+        await db.inventory_movements().insert({
+          variant_id: item.variant_id,
+          warehouse_id: warehouseId,
+          movement_type: 'sale_return',
+          reference_type: 'open_invoice_remove',
+          reference_id: itemId,
+          quantity: item.quantity,
+          qty_before: inv.quantity ?? 0,
+          qty_after: newQty,
+          notes: 'حذف من فاتورة مفتوحة',
+          user_id: userId
+        })
+      }
+    }
+
+    // حذف البند
+    await db.sale_items().delete().eq('id', itemId)
+
+    // إعادة حساب الفاتورة
+    await recalculateOpenInvoice(item.sale_id)
+
+    return { success: true }
+  } catch (e: any) {
+    return { success: false, error: e.message }
+  }
+}
+
+// ═══ إعادة حساب إجماليات الفاتورة المفتوحة ═══
+async function recalculateOpenInvoice(saleId: string) {
+  const { data: items } = await db.sale_items()
+    .select('total, tax_amount, discount_amount')
+    .eq('sale_id', saleId)
+
+  const subtotal = (items ?? []).reduce((s: number, i: any) => s + (i.total ?? 0), 0)
+  const total = subtotal
+
+  // جلب المدفوع الحالي
+  const { data: payments } = await db.sale_payments()
+    .select('amount').eq('sale_id', saleId)
+  const paid = (payments ?? []).reduce((s: number, p: any) => s + p.amount, 0)
+  const remaining = Math.max(0, total - paid)
+
+  await db.sales().update({
+    subtotal,
+    total,
+    paid,
+    remaining,
+    updated_at: new Date().toISOString()
+  }).eq('id', saleId)
+}
+
+// ═══ إضافة دفعة لفاتورة مفتوحة ═══
+export async function addPaymentToInvoice(
+  saleId: string,
+  amount: number,
+  paymentMethod: string,
+  notes: string,
+  userId?: string
+) {
+  try {
+    if (amount <= 0) throw new Error('المبلغ يجب أن يكون أكبر من صفر')
+
+    // 1. حفظ الدفعة
+    const { data: payment, error: payErr } = await db.sale_payments().insert({
+      sale_id: saleId,
+      amount,
+      payment_method: paymentMethod as any,
+      notes: notes || null,
+      received_by: userId
+    }).select().single()
+
+    if (payErr) throw payErr
+
+    // 2. تحديث الفاتورة
+    await recalculateOpenInvoice(saleId)
+
+    // 3. جلب الفاتورة لتحديث الخزينة وحساب العميل
+    const { data: sale } = await db.sales()
+      .select('invoice_no, customer_id')
+      .eq('id', saleId).single()
+
+    // 4. إضافة للخزينة (نقدي فقط)
+    if (paymentMethod === 'cash' && sale) {
+      const { data: reg } = await db.cash_registers()
+        .select('id, current_balance')
+        .eq('is_active', true).single()
+
+      if (reg) {
+        const newBal = (reg.current_balance ?? 0) + amount
+        await db.cash_registers().update({ current_balance: newBal }).eq('id', reg.id)
+        await db.cash_movements().insert({
+          register_id: reg.id,
+          movement_type: 'in',
+          source: 'sale',
+          reference_id: saleId,
+          reference_no: sale.invoice_no,
+          amount,
+          balance_after: newBal,
+          description: `دفعة فاتورة ${sale.invoice_no}`,
+          user_id: userId
+        })
+      }
+    }
+
+    // 5. تحديث رصيد العميل
+    if (sale?.customer_id) {
+      const { data: cust } = await db.customers()
+        .select('current_balance').eq('id', sale.customer_id).single()
+      if (cust) {
+        await db.customers().update({
+          current_balance: Math.max(0, (cust.current_balance ?? 0) - amount)
+        }).eq('id', sale.customer_id)
+      }
+    }
+
+    return { success: true, paymentId: payment.id }
+  } catch (e: any) {
+    return { success: false, error: e.message }
+  }
+}
+
+// ═══ إغلاق فاتورة مفتوحة ═══
+export async function closeOpenInvoice(saleId: string) {
+  try {
+    // التحقق أن لها بنود
+    const { count } = await db.sale_items().select('id', { count: 'exact', head: true }).eq('sale_id', saleId)
+    if (!count || count === 0) {
+      throw new Error('لا يمكن إغلاق فاتورة فارغة')
+    }
+
+    const { error } = await db.sales().update({
+      status: 'completed',
+      updated_at: new Date().toISOString()
+    }).eq('id', saleId)
+
+    if (error) throw error
+    return { success: true }
+  } catch (e: any) {
+    return { success: false, error: e.message }
+  }
+}
+
+// ═══ إنشاء فاتورة مفتوحة جديدة ═══
+export async function createOpenInvoice(
+  customerId: string,
+  warehouseId: string,
+  userId?: string
+) {
+  try {
+    const { data: invNo } = await rpc.nextInvoiceNumber('INV')
+
+    const { data: sale, error } = await db.sales().insert({
+      invoice_no: invNo as string,
+      invoice_type: 'simple',
+      sale_type: 'credit',
+      warehouse_id: warehouseId,
+      customer_id: customerId,
+      subtotal: 0,
+      total: 0,
+      paid: 0,
+      remaining: 0,
+      payment_method: 'cash',
+      status: 'open',
+      cashier_id: userId
+    }).select().single()
+
+    if (error) throw error
+    return { success: true, sale }
+  } catch (e: any) {
+    return { success: false, error: e.message }
+  }
+}
+
+// ═══ المدفوعات المستقلة (Customer Payments) ═══
+export function useCustomerStandalonePayments(customerId: string | null) {
+  const [data, setData] = useState<any[]>([])
+  const [loading, setLoading] = useState(false)
+  const [refreshKey, setRefreshKey] = useState(0)
+
+  useEffect(() => {
+    if (!customerId) { setData([]); return }
+    setLoading(true)
+
+    db.from('customer_payments')
+      .select('*')
+      .eq('customer_id', customerId)
+      .order('date', { ascending: false })
+      .limit(100)
+      .then(({ data, error }: any) => {
+        if (!error && data) setData(data)
+        setLoading(false)
+      })
+  }, [customerId, refreshKey])
+
+  return { data, loading, refresh: () => setRefreshKey(k => k + 1) }
+}
+
+export async function createStandalonePayment(payload: {
+  customerId: string
+  amount: number
+  direction: 'in' | 'out'
+  paymentMethod: string
+  notes: string
+  userId?: string
+}) {
+  try {
+    if (payload.amount <= 0) throw new Error('المبلغ يجب أن يكون أكبر من صفر')
+
+    // 1. توليد رقم السند
+    const { data: payNo } = await db.rpc('next_payment_number', { direction: payload.direction })
+
+    // 2. حفظ السند
+    const { data: pay, error: payErr } = await db.from('customer_payments').insert({
+      customer_id: payload.customerId,
+      payment_no: payNo as string,
+      amount: payload.amount,
+      direction: payload.direction,
+      payment_method: payload.paymentMethod,
+      notes: payload.notes || null,
+      created_by: payload.userId
+    }).select().single()
+
+    if (payErr) throw payErr
+
+    // 3. تحديث رصيد العميل
+    const { data: cust } = await db.customers()
+      .select('current_balance').eq('id', payload.customerId).single()
+    if (cust) {
+      const change = payload.direction === 'in' ? -payload.amount : payload.amount
+      await db.customers().update({
+        current_balance: (cust.current_balance ?? 0) + change
+      }).eq('id', payload.customerId)
+    }
+
+    // 4. حركة الخزينة
+    if (payload.paymentMethod === 'cash') {
+      const { data: reg } = await db.cash_registers()
+        .select('id, current_balance').eq('is_active', true).single()
+      if (reg) {
+        const change = payload.direction === 'in' ? payload.amount : -payload.amount
+        const newBal = (reg.current_balance ?? 0) + change
+        await db.cash_registers().update({ current_balance: newBal }).eq('id', reg.id)
+        await db.cash_movements().insert({
+          register_id: reg.id,
+          movement_type: payload.direction === 'in' ? 'in' : 'out',
+          source: payload.direction === 'in' ? 'revenue' : 'expense',
+          reference_id: pay.id,
+          reference_no: payNo as string,
+          amount: payload.amount,
+          balance_after: newBal,
+          description: `${payload.direction === 'in' ? 'دفعة من' : 'دفعة إلى'} عميل - ${payNo}`,
+          user_id: payload.userId
+        })
+      }
+    }
+
+    return { success: true, paymentNo: payNo as string }
+  } catch (e: any) {
+    return { success: false, error: e.message }
+  }
+}
