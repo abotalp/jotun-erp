@@ -5,21 +5,22 @@ import LoginPage from '@/pages/LoginPage'
 import AppLayout from '@/components/layout/AppLayout'
 import DashboardPage from '@/pages/DashboardPage'
 
-// تحميل كسول لكل صفحة (تُحمّل عند الحاجة فقط)
-const POSPage          = lazy(() => import('@/pages/POSPage'))
-const ProductsPage     = lazy(() => import('@/pages/ProductsPage'))
-const CustomersPage    = lazy(() => import('@/pages/CustomersPage'))
-const SalesPage        = lazy(() => import('@/pages/SalesPage'))
-const ColorsPage       = lazy(() => import('@/pages/ColorsPage'))
-const ContractorsPage  = lazy(() => import('@/pages/ContractorsPage'))
-const InventoryPage    = lazy(() => import('@/pages/InventoryPage'))
-const StockTakingPage  = lazy(() => import('@/pages/StockTakingPage'))
-const SuppliersPage    = lazy(() => import('@/pages/SuppliersPage'))
-const PurchasesPage    = lazy(() => import('@/pages/PurchasesPage'))
-const AccountingPage   = lazy(() => import('@/pages/AccountingPage'))
-const ProfitLossPage   = lazy(() => import('@/pages/ProfitLossPage'))
-const ReportsPage      = lazy(() => import('@/pages/ReportsPage'))
-const SettingsPage     = lazy(() => import('@/pages/SettingsPage'))
+const POSPage           = lazy(() => import('@/pages/POSPage'))
+const ProductsPage      = lazy(() => import('@/pages/ProductsPage'))
+const CustomersPage     = lazy(() => import('@/pages/CustomersPage'))
+const SalesPage         = lazy(() => import('@/pages/SalesPage'))
+const ColorsPage        = lazy(() => import('@/pages/ColorsPage'))
+const ContractorsPage   = lazy(() => import('@/pages/ContractorsPage'))
+const InventoryPage     = lazy(() => import('@/pages/InventoryPage'))
+const StockTakingPage   = lazy(() => import('@/pages/StockTakingPage'))
+const SuppliersPage     = lazy(() => import('@/pages/SuppliersPage'))
+const PurchasesPage     = lazy(() => import('@/pages/PurchasesPage'))
+const AccountingPage    = lazy(() => import('@/pages/AccountingPage'))
+const ProfitLossPage    = lazy(() => import('@/pages/ProfitLossPage'))
+const ReportsPage       = lazy(() => import('@/pages/ReportsPage'))
+const SettingsPage      = lazy(() => import('@/pages/SettingsPage'))
+const OpenInvoicesPage  = lazy(() => import('@/pages/OpenInvoicesPage'))
+const PaymentsPage      = lazy(() => import('@/pages/PaymentsPage'))
 
 function LoadingScreen() {
   return (
@@ -52,22 +53,24 @@ export default function App() {
 
   const renderPage = () => {
     switch (activeModule) {
-      case 'dashboard':    return <DashboardPage />
-      case 'pos':          return <POSPage />
-      case 'products':     return <ProductsPage />
-      case 'customers':    return <CustomersPage />
-      case 'sales':        return <SalesPage />
-      case 'colors':       return <ColorsPage />
-      case 'contractors':  return <ContractorsPage />
-      case 'inventory':    return <InventoryPage />
-      case 'stock-taking': return <StockTakingPage />
-      case 'suppliers':    return <SuppliersPage />
-      case 'purchases':    return <PurchasesPage />
-      case 'accounting':   return <AccountingPage />
-      case 'profit-loss':  return <ProfitLossPage />
-      case 'reports':      return <ReportsPage />
-      case 'settings':     return <SettingsPage />
-      default:             return <DashboardPage />
+      case 'dashboard':      return <DashboardPage />
+      case 'pos':            return <POSPage />
+      case 'products':       return <ProductsPage />
+      case 'customers':      return <CustomersPage />
+      case 'sales':          return <SalesPage />
+      case 'open-invoices':  return <OpenInvoicesPage />
+      case 'payments':       return <PaymentsPage />
+      case 'colors':         return <ColorsPage />
+      case 'contractors':    return <ContractorsPage />
+      case 'inventory':      return <InventoryPage />
+      case 'stock-taking':   return <StockTakingPage />
+      case 'suppliers':      return <SuppliersPage />
+      case 'purchases':      return <PurchasesPage />
+      case 'accounting':     return <AccountingPage />
+      case 'profit-loss':    return <ProfitLossPage />
+      case 'reports':        return <ReportsPage />
+      case 'settings':       return <SettingsPage />
+      default:               return <DashboardPage />
     }
   }
 
