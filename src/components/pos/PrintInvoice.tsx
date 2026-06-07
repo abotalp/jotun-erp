@@ -1,5 +1,6 @@
 import React, { useRef } from 'react'
 import { formatCurrency } from '@/lib/utils'
+import html2pdf from 'html2pdf.js'
 
 interface Props {
   invoice: {
@@ -38,6 +39,8 @@ export default function PrintInvoice({
 }: Props) {
   const printRef = useRef<HTMLDivElement>(null)
 
+  const hasDiscount = (invoice.discount_amount ?? 0) > 0
+
   function handlePrint() {
     const printContent = printRef.current?.innerHTML
     if (!printContent) return
@@ -55,143 +58,10 @@ export default function PrintInvoice({
           <meta charset="UTF-8" />
           <title>فاتورة ${invoice.invoice_no}</title>
           <style>
-            @page {
-              size: A4;
-              margin: 15mm;
-            }
-            * {
-              margin: 0;
-              padding: 0;
-              box-sizing: border-box;
-            }
-            body {
-              font-family: 'Cairo', 'Tahoma', 'Arial', sans-serif;
-              direction: rtl;
-              color: #000;
-              background: #fff;
-              padding: 20px;
-            }
-            .invoice-header {
-              text-align: center;
-              border-bottom: 3px solid #1B3A6B;
-              padding-bottom: 15px;
-              margin-bottom: 20px;
-            }
-            .store-name {
-              font-size: 28px;
-              font-weight: 900;
-              color: #1B3A6B;
-              margin-bottom: 5px;
-            }
-            .store-info {
-              font-size: 14px;
-              color: #555;
-              margin: 3px 0;
-            }
-            .invoice-title {
-              background: #1B3A6B;
-              color: #fff;
-              padding: 8px 20px;
-              display: inline-block;
-              border-radius: 8px;
-              font-size: 16px;
-              font-weight: bold;
-              margin-top: 10px;
-            }
-            .invoice-meta {
-              display: flex;
-              justify-content: space-between;
-              padding: 15px;
-              background: #f5f5f5;
-              border-radius: 8px;
-              margin-bottom: 20px;
-              font-size: 14px;
-            }
-            .invoice-meta strong {
-              color: #1B3A6B;
-            }
-            .customer-box {
-              padding: 12px 15px;
-              border: 2px solid #1B3A6B;
-              border-radius: 8px;
-              margin-bottom: 20px;
-              font-size: 14px;
-            }
-            table {
-              width: 100%;
-              border-collapse: collapse;
-              margin-bottom: 20px;
-              font-size: 14px;
-            }
-            thead {
-              background: #1B3A6B;
-              color: #fff;
-            }
-            th, td {
-              padding: 12px 10px;
-              text-align: right;
-              border: 1px solid #ddd;
-            }
-            th {
-              font-weight: bold;
-              text-align: center;
-            }
-            td.center {
-              text-align: center;
-            }
-            tbody tr:nth-child(even) {
-              background: #f9f9f9;
-            }
-            .item-color {
-              font-size: 12px;
-              color: #6B21A8;
-              margin-top: 4px;
-            }
-            .totals {
-              margin-right: auto;
-              width: 50%;
-              border: 2px solid #1B3A6B;
-              border-radius: 8px;
-              overflow: hidden;
-            }
-            .totals-row {
-              display: flex;
-              justify-content: space-between;
-              padding: 10px 15px;
-              font-size: 14px;
-              border-bottom: 1px solid #eee;
-            }
-            .totals-row.grand {
-              background: #D4AF37;
-              color: #fff;
-              font-size: 18px;
-              font-weight: 900;
-              border-bottom: none;
-            }
-            .totals-row.discount {
-              color: #059669;
-            }
-            .totals-row.remaining {
-              color: #DC2626;
-              font-weight: bold;
-            }
-            .footer {
-              text-align: center;
-              margin-top: 40px;
-              padding-top: 20px;
-              border-top: 2px dashed #999;
-              font-size: 13px;
-              color: #555;
-            }
-            .footer-thanks {
-              font-size: 16px;
-              font-weight: bold;
-              color: #1B3A6B;
-              margin-bottom: 8px;
-            }
-            @media print {
-              body { padding: 0; }
-            }
+            @page { size: A4; margin: 15mm; }
+            * { margin: 0; padding: 0; box-sizing: border-box; }
+            body { font-family: 'Cairo', 'Tahoma', 'Arial', sans-serif; direction: rtl; color: #000; background: #fff; padding: 20px; }
+            @media print { body { padding: 0; } }
           </style>
         </head>
         <body>
@@ -199,15 +69,37 @@ export default function PrintInvoice({
           <script>
             window.onload = function() {
               window.print();
-              setTimeout(function() {
-                window.close();
-              }, 500);
+              setTimeout(function() { window.close(); }, 500);
             }
           </script>
         </body>
       </html>
     `)
     printWindow.document.close()
+  }
+
+  // ✅ تحميل PDF مباشرة
+  async function handleDownloadPDF() {
+    if (!printRef.current) return
+
+    const element = printRef.current.cloneNode(true) as HTMLElement
+    element.style.padding = '20px'
+    element.style.background = '#fff'
+
+    const opt = {
+      margin: 10,
+      filename: `فاتورة-${invoice.invoice_no}.pdf`,
+      image: { type: 'jpeg', quality: 0.98 },
+      html2canvas: { scale: 2, useCORS: true, letterRendering: true },
+      jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
+    }
+
+    try {
+      await html2pdf().set(opt).from(element).save()
+    } catch (e) {
+      console.error('PDF Error:', e)
+      alert('حدث خطأ أثناء إنشاء PDF')
+    }
   }
 
   const date = new Date(invoice.date).toLocaleString('ar-EG', {
@@ -230,6 +122,12 @@ export default function PrintInvoice({
           <h3 className="text-lg font-black">🖨️ معاينة الفاتورة - A4</h3>
           <div className="flex gap-2">
             <button
+              onClick={handleDownloadPDF}
+              className="px-5 py-2.5 bg-red-600 text-white rounded-xl text-sm font-bold hover:opacity-90 shadow-lg"
+            >
+              📥 تحميل PDF
+            </button>
+            <button
               onClick={handlePrint}
               className="px-5 py-2.5 bg-blue-600 text-white rounded-xl text-sm font-bold hover:opacity-90 shadow-lg"
             >
@@ -245,24 +143,20 @@ export default function PrintInvoice({
         </div>
 
         <div className="flex-1 overflow-y-auto p-6 bg-gray-200">
-          <div ref={printRef} className="bg-white p-8 shadow-md mx-auto" style={{ maxWidth: '210mm', minHeight: '297mm' }}>
+          <div ref={printRef} className="bg-white p-8 shadow-md mx-auto" style={{ maxWidth: '210mm', minHeight: '297mm', fontFamily: "'Cairo', 'Tahoma', 'Arial', sans-serif", direction: 'rtl' }}>
 
             {/* Header */}
-            <div className="invoice-header" style={{ textAlign: 'center', borderBottom: '3px solid #1B3A6B', paddingBottom: '15px', marginBottom: '20px' }}>
+            <div style={{ textAlign: 'center', borderBottom: '3px solid #1B3A6B', paddingBottom: '15px', marginBottom: '20px' }}>
               <h1 style={{ fontSize: '28px', fontWeight: 900, color: '#1B3A6B', marginBottom: '5px' }}>
                 {storeName ?? 'معرض جوتن للدهانات'}
               </h1>
-              {storePhone && (
-                <p style={{ fontSize: '14px', color: '#555', margin: '3px 0' }}>📞 {storePhone}</p>
-              )}
-              {storeAddress && (
-                <p style={{ fontSize: '14px', color: '#555', margin: '3px 0' }}>📍 {storeAddress}</p>
-              )}
+              {storePhone && <p style={{ fontSize: '14px', color: '#555', margin: '3px 0' }}>📞 {storePhone}</p>}
+              {storeAddress && <p style={{ fontSize: '14px', color: '#555', margin: '3px 0' }}>📍 {storeAddress}</p>}
               {invoice.is_tax_invoice && taxNumber && (
                 <p style={{ fontSize: '14px', color: '#555', margin: '3px 0' }}>الرقم الضريبي: {taxNumber}</p>
               )}
               <div style={{ background: '#1B3A6B', color: '#fff', padding: '8px 20px', display: 'inline-block', borderRadius: '8px', fontSize: '16px', fontWeight: 'bold', marginTop: '10px' }}>
-                {invoice.is_tax_invoice ? '📋 فاتورة ضريبية' : '🧾 فاتورة بيع'}
+                {invoice.is_tax_invoice ? 'فاتورة ضريبية' : 'فاتورة بيع'}
               </div>
             </div>
 
@@ -281,9 +175,9 @@ export default function PrintInvoice({
             {/* Customer */}
             {invoice.customer_name && (
               <div style={{ padding: '12px 15px', border: '2px solid #1B3A6B', borderRadius: '8px', marginBottom: '20px', fontSize: '14px' }}>
-                <div>👤 العميل: <strong>{invoice.customer_name}</strong></div>
+                <div>العميل: <strong>{invoice.customer_name}</strong></div>
                 {invoice.customer_phone && (
-                  <div style={{ marginTop: '5px' }}>📱 الهاتف: <strong>{invoice.customer_phone}</strong></div>
+                  <div style={{ marginTop: '5px' }}>الهاتف: <strong>{invoice.customer_phone}</strong></div>
                 )}
               </div>
             )}
@@ -308,7 +202,7 @@ export default function PrintInvoice({
                       {item.size_name && <div style={{ fontSize: '12px', color: '#666' }}>{item.size_name}</div>}
                       {item.color_code && (
                         <div style={{ fontSize: '12px', color: '#6B21A8', marginTop: '4px' }}>
-                          🎨 {item.color_code} - {item.color_name}
+                          اللون: {item.color_code} - {item.color_name}
                         </div>
                       )}
                     </td>
@@ -326,26 +220,31 @@ export default function PrintInvoice({
                 <span>المجموع:</span>
                 <strong>{formatCurrency(invoice.subtotal)}</strong>
               </div>
-              {invoice.discount_amount > 0 && (
+
+              {hasDiscount && (
                 <div style={{ display: 'flex', justifyContent: 'space-between', padding: '10px 15px', fontSize: '14px', borderBottom: '1px solid #eee', color: '#059669' }}>
                   <span>الخصم:</span>
                   <strong>- {formatCurrency(invoice.discount_amount)}</strong>
                 </div>
               )}
+
               {invoice.tax_amount > 0 && (
                 <div style={{ display: 'flex', justifyContent: 'space-between', padding: '10px 15px', fontSize: '14px', borderBottom: '1px solid #eee' }}>
                   <span>الضريبة ({invoice.tax_rate}%):</span>
                   <strong>{formatCurrency(invoice.tax_amount)}</strong>
                 </div>
               )}
+
               <div style={{ display: 'flex', justifyContent: 'space-between', padding: '12px 15px', background: '#D4AF37', color: '#fff', fontSize: '18px', fontWeight: 900 }}>
                 <span>الإجمالي:</span>
                 <span>{formatCurrency(invoice.total)}</span>
               </div>
+
               <div style={{ display: 'flex', justifyContent: 'space-between', padding: '10px 15px', fontSize: '14px', borderTop: '1px solid #eee' }}>
                 <span>المدفوع:</span>
                 <strong>{formatCurrency(invoice.paid)}</strong>
               </div>
+
               {invoice.remaining > 0 && (
                 <div style={{ display: 'flex', justifyContent: 'space-between', padding: '10px 15px', fontSize: '14px', color: '#DC2626', fontWeight: 'bold' }}>
                   <span>المتبقي:</span>
