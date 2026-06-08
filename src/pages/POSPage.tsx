@@ -14,7 +14,6 @@ import {
 } from 'lucide-react'
 import type { ProductVariant, Color, Customer, CartItem } from '@/types/database'
 
-// مكون اختيار الصنايعي
 function ContractorSelector({ onSelect, onClose }: any) {
   const [search, setSearch] = useState('')
   const [contractors, setContractors] = useState<any[]>([])
@@ -223,9 +222,12 @@ export default function POSPage() {
       finalCustomerName = quickCustomerName.trim()
     }
 
-    const effectivePaid = paidAmount || totals.total
+    // إذا كانت الفاتورة آجلة بالكامل (paid = 0) لازم يكون فيه عميل
+    if (paidAmount === 0 && !finalCustomerId) {
+      alert('⚠️ الفاتورة الآجلة تحتاج عميل مسجل')
+      return
+    }
 
-    // حفظ snapshot للطباعة (بدون أي بيانات الصنايعي)
     const printSnapshot = {
       invoice_no: '',
       date: new Date().toISOString(),
@@ -235,8 +237,8 @@ export default function POSPage() {
       tax_rate: isTaxInvoice ? (settings?.default_tax_rate ?? 14) : 0,
       tax_amount: totals.taxAmount,
       total: totals.total,
-      paid: effectivePaid,
-      remaining: Math.max(0, totals.total - effectivePaid),
+      paid: paidAmount,
+      remaining: Math.max(0, totals.total - paidAmount),
       customer_name: finalCustomerName,
       customer_phone: quickCustomerPhone || null,
       items: cart.map(item => ({
@@ -258,14 +260,13 @@ export default function POSPage() {
       discountType,
       discountValue,
       paymentMethod,
-      paidAmount: effectivePaid,
+      paidAmount,
       isTaxInvoice,
       notes: '',
       contractorCommission: 0
     })
 
     if (result.success) {
-      // حفظ عمولة الصنايعي (في الخلفية - لا تظهر للعميل)
       if (selectedContractor && commissionValue > 0 && result.sale) {
         await saveContractorCommission(
           selectedContractor.id,
@@ -354,7 +355,6 @@ export default function POSPage() {
             <span className="text-sm flex-1 truncate">{customerName ?? 'أو اختر عميل'}</span>
           </button>
 
-          {/* الصنايعي */}
           <button onClick={() => setShowContractorSelect(true)} className="w-full flex items-center gap-2 bg-orange-500/20 hover:bg-orange-500/30 rounded-xl px-3 py-2 text-right mb-2">
             <HardHat size={14} className="text-orange-300" />
             <span className="text-sm flex-1 truncate">{selectedContractor?.name ?? '👷 إضافة صنايعي (اختياري)'}</span>
@@ -463,13 +463,38 @@ export default function POSPage() {
             </div>
             <div className="mb-4">
               <label className="block text-sm font-bold mb-1">المبلغ المدفوع</label>
-              <input type="number" value={paidAmount || ''} onChange={e => setPaidAmount(+e.target.value || 0)} className="w-full px-4 py-3 text-xl font-black text-center border-2 rounded-xl outline-none focus:border-amber-400" autoFocus />
+              <input type="number" value={paidAmount} onChange={e => setPaidAmount(+e.target.value || 0)} className="w-full px-4 py-3 text-xl font-black text-center border-2 rounded-xl outline-none focus:border-amber-400" autoFocus />
             </div>
+
+            {/* أزرار سريعة للمبالغ */}
+            <div className="grid grid-cols-3 gap-2 mb-3">
+              <button
+                onClick={() => setPaidAmount(totals.total)}
+                className="py-2 bg-green-50 text-green-700 rounded-lg text-xs font-bold hover:bg-green-100"
+              >
+                💵 الدفع كامل
+              </button>
+              <button
+                onClick={() => setPaidAmount(totals.total / 2)}
+                className="py-2 bg-amber-50 text-amber-700 rounded-lg text-xs font-bold hover:bg-amber-100"
+              >
+                ½ النصف
+              </button>
+              <button
+                onClick={() => setPaidAmount(0)}
+                className="py-2 bg-red-50 text-red-700 rounded-lg text-xs font-bold hover:bg-red-100"
+              >
+                💳 آجل بالكامل
+              </button>
+            </div>
+
             {paidAmount > totals.total && <div className="bg-green-50 rounded-xl p-3 mb-4 text-center"><p className="text-sm text-green-700 font-bold">الباقي: {formatCurrency(paidAmount - totals.total)}</p></div>}
             {paidAmount < totals.total && paidAmount > 0 && <div className="bg-amber-50 rounded-xl p-3 mb-4 text-center"><p className="text-sm text-amber-700 font-bold">متبقي (آجل): {formatCurrency(totals.total - paidAmount)}</p></div>}
+            {paidAmount === 0 && <div className="bg-red-50 rounded-xl p-3 mb-4 text-center"><p className="text-sm text-red-700 font-bold">⚠️ فاتورة آجلة بالكامل: {formatCurrency(totals.total)}</p></div>}
+
             <div className="flex gap-3">
               <button onClick={() => setShowPayModal(false)} className="flex-1 py-3 border-2 rounded-xl font-bold hover:bg-gray-50">إلغاء</button>
-              <button onClick={handleCheckout} disabled={saving || paidAmount <= 0} className="flex-1 py-3 text-white font-black rounded-xl disabled:opacity-50" style={{ background: 'linear-gradient(to left, #D4AF37, #B8960C)' }}>
+              <button onClick={handleCheckout} disabled={saving} className="flex-1 py-3 text-white font-black rounded-xl disabled:opacity-50" style={{ background: 'linear-gradient(to left, #D4AF37, #B8960C)' }}>
                 {saving ? '⏳' : <><Receipt size={16} className="inline ml-1" /> حفظ وطباعة</>}
               </button>
             </div>
