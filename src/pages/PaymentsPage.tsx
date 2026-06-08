@@ -1,11 +1,10 @@
 import React, { useState, useEffect } from 'react'
 import { useAppStore } from '@/store/useAppStore'
-import { db } from '@/lib/supabase'
+import { supabase, db } from '@/lib/supabase'
 import { createStandalonePayment } from '@/hooks/useOpenInvoices'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import {
-  Plus, Search, X, ArrowDownCircle, ArrowUpCircle,
-  Wallet, Receipt, User, FileText
+  Plus, Search, X, ArrowDownCircle, ArrowUpCircle, Wallet, Receipt
 } from 'lucide-react'
 
 export default function PaymentsPage() {
@@ -17,7 +16,7 @@ export default function PaymentsPage() {
   const [refreshKey, setRefreshKey] = useState(0)
 
   useEffect(() => {
-    db.from('customer_payments')
+    supabase.from('customer_payments')
       .select(`*, customer:customers(id, name, customer_type, code)`)
       .order('date', { ascending: false })
       .limit(200)
@@ -190,7 +189,6 @@ function AddPaymentModal({ direction, onClose, onSaved }: any) {
         </div>
 
         <div className="flex-1 overflow-y-auto p-5 space-y-4">
-          {/* اختيار العميل */}
           <div>
             <label className="block text-sm font-bold mb-2">العميل/الموزع *</label>
             {selectedCustomer ? (
