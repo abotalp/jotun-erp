@@ -8,25 +8,22 @@ import { useAppStore } from '@/store/useAppStore'
 import { db } from '@/lib/supabase'
 import { formatCurrency, formatDate, formatDateTime } from '@/lib/utils'
 import {
-  Plus, Search, X, FileText, Eye, ShoppingCart,
-  CheckCircle, AlertCircle, Trash2, DollarSign, Lock
+  Plus, Search, X, FileText, Eye,
+  AlertCircle, Trash2, DollarSign, Lock, UserPlus
 } from 'lucide-react'
 
-// Modal: تفاصيل وإدارة الفاتورة المفتوحة
 function OpenInvoiceDetailModal({ saleId, onClose, onChange }: any) {
   const { user, activeWarehouse } = useAppStore()
   const [invoice, setInvoice] = useState<any>(null)
   const [loading, setLoading] = useState(true)
   const [tab, setTab] = useState<'items' | 'add-item' | 'payment'>('items')
 
-  // إضافة منتج
   const [search, setSearch] = useState('')
   const [variants, setVariants] = useState<any[]>([])
   const [selectedVariant, setSelectedVariant] = useState<any>(null)
   const [qty, setQty] = useState(1)
   const [price, setPrice] = useState(0)
 
-  // دفعة
   const [payAmount, setPayAmount] = useState(0)
   const [payMethod, setPayMethod] = useState('cash')
   const [payNotes, setPayNotes] = useState('')
@@ -280,18 +277,26 @@ function OpenInvoiceDetailModal({ saleId, onClose, onChange }: any) {
   )
 }
 
-// Modal: إنشاء فاتورة مفتوحة جديدة
+// 🆕 Modal محسّن: إنشاء فاتورة + إضافة عميل جديد
 function NewOpenInvoiceModal({ onClose, onCreated }: any) {
   const { user, activeWarehouse } = useAppStore()
   const [customers, setCustomers] = useState<any[]>([])
   const [search, setSearch] = useState('')
   const [creating, setCreating] = useState(false)
+  const [showNewCustomer, setShowNewCustomer] = useState(false)
+
+  // بيانات العميل الجديد
+  const [newName, setNewName] = useState('')
+  const [newPhone, setNewPhone] = useState('')
+  const [newType, setNewType] = useState('retail')
+  const [savingCustomer, setSavingCustomer] = useState(false)
 
   useEffect(() => {
+    if (showNewCustomer) return
     let q = db.customers().select('id, code, name, phone, customer_type, current_balance').eq('is_active', true).order('name').limit(30)
     if (search.length >= 1) q = q.or(`name.ilike.%${search}%,phone.ilike.%${search}%`)
     q.then(({ data }) => setCustomers(data ?? []))
-  }, [search])
+  }, [search, showNewCustomer])
 
   async function handleCreate(customerId: string) {
     if (!activeWarehouse?.id) { alert('لا يوجد مخزن'); return }
@@ -305,30 +310,153 @@ function NewOpenInvoiceModal({ onClose, onCreated }: any) {
     } else alert(r.error)
   }
 
+  async function handleAddNewCustomer() {
+    if (!newName.trim()) { alert('اسم العميل مطلوب'); return }
+    setSavingCustomer(true)
+
+    const { count } = await db.customers().select('id', { count: 'exact', head: true })
+    const code = `CUS-${String((count ?? 0) + 1).padStart(5, '0')}`
+
+    const { data: newCust, error } = await db.customers().insert({
+      name: newName.trim(),
+      phone: newPhone.trim() || null,
+      code,
+      customer_type: newType,
+      is_active: true
+    }).select().single()
+
+    if (error || !newCust) {
+      setSavingCustomer(false)
+      alert(`خطأ: ${error?.message}`)
+      return
+    }
+
+    // إنشاء الفاتورة فوراً للعميل الجديد
+    if (!activeWarehouse?.id) {
+      setSavingCustomer(false)
+      alert('لا يوجد مخزن')
+      return
+    }
+
+    const r = await createOpenInvoice(newCust.id, activeWarehouse.id, user?.id)
+    setSavingCustomer(false)
+
+    if (r.success) {
+      alert(`✅ تم إضافة العميل وإنشاء فاتورة: ${r.sale.invoice_no}`)
+      onCreated?.(r.sale.id)
+      onClose()
+    } else {
+      alert(r.error)
+    }
+  }
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }} onClick={onClose} dir="rtl">
-      <div onClick={e => e.stopPropagation()} className="bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[80vh] flex flex-col">
+      <div onClick={e => e.stopPropagation()} className="bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[85vh] flex flex-col">
         <div className="flex items-center justify-between p-4 border-b">
-          <h3 className="text-lg font-black">➕ فاتورة مفتوحة جديدة</h3>
+          <h3 className="text-lg font-black">
+            {showNewCustomer ? '➕ عميل جديد + فاتورة' : '➕ فاتورة مفتوحة جديدة'}
+          </h3>
           <button onClick={onClose}><X size={20} className="text-gray-400" /></button>
         </div>
-        <div className="p-3 border-b">
-          <input value={search} onChange={e => setSearch(e.target.value)} placeholder="🔍 ابحث عن عميل..." className="w-full px-3 py-2 border-2 rounded-lg text-sm" />
-        </div>
-        <div className="flex-1 overflow-y-auto p-3 space-y-1">
-          {customers.map((c: any) => (
-            <button key={c.id} onClick={() => handleCreate(c.id)} disabled={creating} className="w-full p-3 bg-gray-50 hover:bg-amber-50 rounded-xl text-right">
-              <p className="text-sm font-bold">{c.name}</p>
-              <p className="text-xs text-gray-500">{c.code} | الرصيد: {formatCurrency(Math.abs(c.current_balance))}{c.current_balance > 0 ? ' (مديونية)' : ''}</p>
-            </button>
-          ))}
-        </div>
+
+        {showNewCustomer ? (
+          <>
+            <div className="p-4 space-y-3">
+              <div className="bg-blue-50 rounded-xl p-3 text-xs text-blue-800">
+                💡 سيتم إنشاء العميل وفتح فاتورة له فوراً
+              </div>
+
+              <div>
+                <label className="block text-sm font-bold mb-1">اسم العميل *</label>
+                <input
+                  value={newName}
+                  onChange={e => setNewName(e.target.value)}
+                  placeholder="مثال: محمد أحمد"
+                  className="w-full px-3 py-2.5 border-2 rounded-xl text-sm outline-none focus:border-amber-400"
+                  autoFocus
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-bold mb-1">رقم الهاتف</label>
+                <input
+                  value={newPhone}
+                  onChange={e => setNewPhone(e.target.value)}
+                  type="tel"
+                  placeholder="01xxxxxxxxx"
+                  className="w-full px-3 py-2.5 border-2 rounded-xl text-sm outline-none focus:border-amber-400"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-bold mb-1">نوع العميل</label>
+                <select
+                  value={newType}
+                  onChange={e => setNewType(e.target.value)}
+                  className="w-full px-3 py-2.5 border-2 rounded-xl text-sm bg-white outline-none"
+                >
+                  <option value="retail">عادي</option>
+                  <option value="wholesale">جملة</option>
+                  <option value="contractor">مقاول</option>
+                  <option value="engineer">مهندس</option>
+                  <option value="company">شركة</option>
+                  <option value="distributor">موزع / وكيل</option>
+                  <option value="vip">VIP</option>
+                </select>
+              </div>
+            </div>
+
+            <div className="p-4 border-t flex gap-2">
+              <button onClick={() => setShowNewCustomer(false)} className="flex-1 py-2.5 border-2 rounded-xl font-bold hover:bg-gray-50">
+                ← رجوع
+              </button>
+              <button
+                onClick={handleAddNewCustomer}
+                disabled={savingCustomer}
+                className="flex-1 py-2.5 text-white font-bold rounded-xl hover:opacity-90 disabled:opacity-50"
+                style={{ background: 'linear-gradient(to left, #F59E0B, #D97706)' }}
+              >
+                {savingCustomer ? '⏳' : '✅ حفظ وإنشاء فاتورة'}
+              </button>
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="p-3 border-b space-y-2">
+              <input
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+                placeholder="🔍 ابحث عن عميل..."
+                className="w-full px-3 py-2 border-2 rounded-lg text-sm"
+              />
+              <button
+                onClick={() => setShowNewCustomer(true)}
+                className="w-full py-2 bg-amber-50 text-amber-700 rounded-lg text-sm font-bold hover:bg-amber-100 flex items-center justify-center gap-2"
+              >
+                <UserPlus size={14} /> ➕ إضافة عميل جديد
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-3 space-y-1">
+              {customers.length === 0 ? (
+                <div className="text-center py-8 text-gray-400 text-sm">
+                  لا يوجد عملاء. اضغط "إضافة عميل جديد"
+                </div>
+              ) : customers.map((c: any) => (
+                <button key={c.id} onClick={() => handleCreate(c.id)} disabled={creating} className="w-full p-3 bg-gray-50 hover:bg-amber-50 rounded-xl text-right">
+                  <p className="text-sm font-bold">{c.name}</p>
+                  <p className="text-xs text-gray-500">{c.code} | {c.phone ?? '-'} | الرصيد: {formatCurrency(Math.abs(c.current_balance))}{c.current_balance > 0 ? ' (مديونية)' : ''}</p>
+                </button>
+              ))}
+            </div>
+          </>
+        )}
       </div>
     </div>
   )
 }
 
-// الصفحة الرئيسية
 export default function OpenInvoicesPage() {
   const [showNew, setShowNew] = useState(false)
   const [selectedId, setSelectedId] = useState<string | null>(null)
