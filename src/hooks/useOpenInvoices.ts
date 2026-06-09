@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { db, rpc } from '@/lib/supabase'
+import { db, rpc, supabase } from '@/lib/supabase'
 
 // ═══ قائمة الفواتير المفتوحة ═══
 export function useOpenInvoices(customerId?: string | null) {
@@ -30,7 +30,7 @@ export function useOpenInvoices(customerId?: string | null) {
   return { data, loading, refresh: () => setRefreshKey(k => k + 1) }
 }
 
-// ═══ جلب فاتورة مفتوحة واحدة بكل تفاصيلها ═══
+// ═══ جلب فاتورة مفتوحة واحدة ═══
 export async function getOpenInvoice(saleId: string) {
   try {
     const { data, error } = await db.sales()
@@ -53,7 +53,7 @@ export async function getOpenInvoice(saleId: string) {
   }
 }
 
-// ═══ إضافة منتج إلى فاتورة مفتوحة ═══
+// ═══ إضافة منتج للفاتورة المفتوحة ═══
 export async function addItemToOpenInvoice(
   saleId: string,
   item: {
@@ -69,7 +69,6 @@ export async function addItemToOpenInvoice(
   userId?: string
 ) {
   try {
-    // 1. إضافة البند
     const subtotal = item.quantity * item.unitPrice
     const profit = subtotal - (item.costPrice * item.quantity)
 
@@ -89,7 +88,6 @@ export async function addItemToOpenInvoice(
 
     if (itemErr) throw itemErr
 
-    // 2. إضافة اللون إن وجد
     if (item.color && newItem) {
       await db.sale_item_colors().insert({
         sale_item_id: newItem.id,
@@ -100,7 +98,6 @@ export async function addItemToOpenInvoice(
       })
     }
 
-    // 3. خصم من المخزون
     const { data: inv } = await db.inventory()
       .select('id, quantity')
       .eq('variant_id', item.variantId)
@@ -129,9 +126,7 @@ export async function addItemToOpenInvoice(
       })
     }
 
-    // 4. تحديث إجماليات الفاتورة
     await recalculateOpenInvoice(saleId)
-
     return { success: true }
   } catch (e: any) {
     return { success: false, error: e.message }
@@ -141,14 +136,12 @@ export async function addItemToOpenInvoice(
 // ═══ حذف بند من فاتورة مفتوحة ═══
 export async function removeItemFromOpenInvoice(itemId: string, warehouseId: string, userId?: string) {
   try {
-    // جلب بيانات البند
     const { data: item } = await db.sale_items()
       .select('sale_id, variant_id, quantity, cost_price')
       .eq('id', itemId).single()
 
     if (!item) throw new Error('البند غير موجود')
 
-    // إرجاع المخزون
     if (item.variant_id) {
       const { data: inv } = await db.inventory()
         .select('id, quantity')
@@ -178,19 +171,15 @@ export async function removeItemFromOpenInvoice(itemId: string, warehouseId: str
       }
     }
 
-    // حذف البند
     await db.sale_items().delete().eq('id', itemId)
-
-    // إعادة حساب الفاتورة
     await recalculateOpenInvoice(item.sale_id)
-
     return { success: true }
   } catch (e: any) {
     return { success: false, error: e.message }
   }
 }
 
-// ═══ إعادة حساب إجماليات الفاتورة المفتوحة ═══
+// ═══ إعادة حساب الفاتورة ═══
 async function recalculateOpenInvoice(saleId: string) {
   const { data: items } = await db.sale_items()
     .select('total, tax_amount, discount_amount')
@@ -199,22 +188,18 @@ async function recalculateOpenInvoice(saleId: string) {
   const subtotal = (items ?? []).reduce((s: number, i: any) => s + (i.total ?? 0), 0)
   const total = subtotal
 
-  // جلب المدفوع الحالي
   const { data: payments } = await db.sale_payments()
     .select('amount').eq('sale_id', saleId)
   const paid = (payments ?? []).reduce((s: number, p: any) => s + p.amount, 0)
   const remaining = Math.max(0, total - paid)
 
   await db.sales().update({
-    subtotal,
-    total,
-    paid,
-    remaining,
+    subtotal, total, paid, remaining,
     updated_at: new Date().toISOString()
   }).eq('id', saleId)
 }
 
-// ═══ إضافة دفعة لفاتورة مفتوحة ═══
+// ═══ إضافة دفعة لفاتورة ═══
 export async function addPaymentToInvoice(
   saleId: string,
   amount: number,
@@ -225,7 +210,6 @@ export async function addPaymentToInvoice(
   try {
     if (amount <= 0) throw new Error('المبلغ يجب أن يكون أكبر من صفر')
 
-    // 1. حفظ الدفعة
     const { data: payment, error: payErr } = await db.sale_payments().insert({
       sale_id: saleId,
       amount,
@@ -236,15 +220,12 @@ export async function addPaymentToInvoice(
 
     if (payErr) throw payErr
 
-    // 2. تحديث الفاتورة
     await recalculateOpenInvoice(saleId)
 
-    // 3. جلب الفاتورة لتحديث الخزينة وحساب العميل
     const { data: sale } = await db.sales()
       .select('invoice_no, customer_id')
       .eq('id', saleId).single()
 
-    // 4. إضافة للخزينة (نقدي فقط)
     if (paymentMethod === 'cash' && sale) {
       const { data: reg } = await db.cash_registers()
         .select('id, current_balance')
@@ -267,7 +248,6 @@ export async function addPaymentToInvoice(
       }
     }
 
-    // 5. تحديث رصيد العميل
     if (sale?.customer_id) {
       const { data: cust } = await db.customers()
         .select('current_balance').eq('id', sale.customer_id).single()
@@ -284,14 +264,193 @@ export async function addPaymentToInvoice(
   }
 }
 
-// ═══ إغلاق فاتورة مفتوحة ═══
+// ═══ تعديل دفعة ═══
+export async function updatePayment(
+  paymentId: string,
+  newAmount: number,
+  newMethod: string,
+  newNotes: string,
+  userId?: string
+) {
+  try {
+    if (newAmount <= 0) throw new Error('المبلغ يجب أن يكون أكبر من صفر')
+
+    const { data: oldPay } = await db.sale_payments()
+      .select('amount, sale_id, payment_method')
+      .eq('id', paymentId)
+      .single()
+
+    if (!oldPay) throw new Error('الدفعة غير موجودة')
+
+    const diff = newAmount - oldPay.amount
+
+    const { error: updErr } = await db.sale_payments()
+      .update({
+        amount: newAmount,
+        payment_method: newMethod as any,
+        notes: newNotes || null
+      })
+      .eq('id', paymentId)
+
+    if (updErr) throw updErr
+
+    const { data: items } = await db.sale_items()
+      .select('total')
+      .eq('sale_id', oldPay.sale_id)
+
+    const subtotal = (items ?? []).reduce((s: number, i: any) => s + (i.total ?? 0), 0)
+
+    const { data: allPays } = await db.sale_payments()
+      .select('amount')
+      .eq('sale_id', oldPay.sale_id)
+
+    const totalPaid = (allPays ?? []).reduce((s: number, p: any) => s + p.amount, 0)
+    const remaining = Math.max(0, subtotal - totalPaid)
+
+    await db.sales().update({
+      paid: totalPaid,
+      remaining,
+      updated_at: new Date().toISOString()
+    }).eq('id', oldPay.sale_id)
+
+    // تحديث الخزينة
+    if (oldPay.payment_method === 'cash' || newMethod === 'cash') {
+      const { data: reg } = await db.cash_registers()
+        .select('id, current_balance')
+        .eq('is_active', true)
+        .single()
+
+      if (reg) {
+        let cashChange = 0
+        if (oldPay.payment_method === 'cash' && newMethod === 'cash') {
+          cashChange = diff
+        } else if (oldPay.payment_method === 'cash' && newMethod !== 'cash') {
+          cashChange = -oldPay.amount
+        } else if (oldPay.payment_method !== 'cash' && newMethod === 'cash') {
+          cashChange = newAmount
+        }
+
+        if (cashChange !== 0) {
+          const newBal = (reg.current_balance ?? 0) + cashChange
+          await db.cash_registers().update({ current_balance: newBal }).eq('id', reg.id)
+          await db.cash_movements().insert({
+            register_id: reg.id,
+            movement_type: cashChange > 0 ? 'in' : 'out',
+            source: 'adjustment',
+            reference_id: paymentId,
+            amount: Math.abs(cashChange),
+            balance_after: newBal,
+            description: `تعديل دفعة فاتورة`,
+            user_id: userId
+          })
+        }
+      }
+    }
+
+    // تحديث رصيد العميل
+    const { data: sale } = await db.sales()
+      .select('customer_id, invoice_no')
+      .eq('id', oldPay.sale_id)
+      .single()
+
+    if (sale?.customer_id) {
+      const { data: cust } = await db.customers()
+        .select('current_balance')
+        .eq('id', sale.customer_id)
+        .single()
+
+      if (cust) {
+        await db.customers().update({
+          current_balance: Math.max(0, (cust.current_balance ?? 0) - diff)
+        }).eq('id', sale.customer_id)
+      }
+    }
+
+    return { success: true }
+  } catch (e: any) {
+    return { success: false, error: e.message }
+  }
+}
+
+// ═══ حذف دفعة ═══
+export async function deletePayment(paymentId: string, userId?: string) {
+  try {
+    const { data: pay } = await db.sale_payments()
+      .select('amount, sale_id, payment_method')
+      .eq('id', paymentId)
+      .single()
+
+    if (!pay) throw new Error('الدفعة غير موجودة')
+
+    const { data: sale } = await db.sales()
+      .select('customer_id, invoice_no')
+      .eq('id', pay.sale_id)
+      .single()
+
+    const { error: delErr } = await db.sale_payments().delete().eq('id', paymentId)
+    if (delErr) throw delErr
+
+    const { data: items } = await db.sale_items()
+      .select('total')
+      .eq('sale_id', pay.sale_id)
+    const subtotal = (items ?? []).reduce((s: number, i: any) => s + (i.total ?? 0), 0)
+
+    const { data: allPays } = await db.sale_payments()
+      .select('amount')
+      .eq('sale_id', pay.sale_id)
+    const totalPaid = (allPays ?? []).reduce((s: number, p: any) => s + p.amount, 0)
+
+    await db.sales().update({
+      paid: totalPaid,
+      remaining: Math.max(0, subtotal - totalPaid),
+      updated_at: new Date().toISOString()
+    }).eq('id', pay.sale_id)
+
+    if (pay.payment_method === 'cash') {
+      const { data: reg } = await db.cash_registers()
+        .select('id, current_balance')
+        .eq('is_active', true)
+        .single()
+      if (reg) {
+        const newBal = (reg.current_balance ?? 0) - pay.amount
+        await db.cash_registers().update({ current_balance: newBal }).eq('id', reg.id)
+        await db.cash_movements().insert({
+          register_id: reg.id,
+          movement_type: 'out',
+          source: 'adjustment',
+          reference_id: paymentId,
+          amount: pay.amount,
+          balance_after: newBal,
+          description: `حذف دفعة فاتورة ${sale?.invoice_no ?? ''}`,
+          user_id: userId
+        })
+      }
+    }
+
+    if (sale?.customer_id) {
+      const { data: cust } = await db.customers()
+        .select('current_balance')
+        .eq('id', sale.customer_id)
+        .single()
+
+      if (cust) {
+        await db.customers().update({
+          current_balance: (cust.current_balance ?? 0) + pay.amount
+        }).eq('id', sale.customer_id)
+      }
+    }
+
+    return { success: true }
+  } catch (e: any) {
+    return { success: false, error: e.message }
+  }
+}
+
+// ═══ إغلاق فاتورة ═══
 export async function closeOpenInvoice(saleId: string) {
   try {
-    // التحقق أن لها بنود
     const { count } = await db.sale_items().select('id', { count: 'exact', head: true }).eq('sale_id', saleId)
-    if (!count || count === 0) {
-      throw new Error('لا يمكن إغلاق فاتورة فارغة')
-    }
+    if (!count || count === 0) throw new Error('لا يمكن إغلاق فاتورة فارغة')
 
     const { error } = await db.sales().update({
       status: 'completed',
@@ -305,7 +464,7 @@ export async function closeOpenInvoice(saleId: string) {
   }
 }
 
-// ═══ إنشاء فاتورة مفتوحة جديدة ═══
+// ═══ إنشاء فاتورة مفتوحة ═══
 export async function createOpenInvoice(
   customerId: string,
   warehouseId: string,
@@ -336,7 +495,7 @@ export async function createOpenInvoice(
   }
 }
 
-// ═══ المدفوعات المستقلة (Customer Payments) ═══
+// ═══ المدفوعات المستقلة ═══
 export function useCustomerStandalonePayments(customerId: string | null) {
   const [data, setData] = useState<any[]>([])
   const [loading, setLoading] = useState(false)
@@ -346,7 +505,7 @@ export function useCustomerStandalonePayments(customerId: string | null) {
     if (!customerId) { setData([]); return }
     setLoading(true)
 
-    db.from('customer_payments')
+    supabase.from('customer_payments')
       .select('*')
       .eq('customer_id', customerId)
       .order('date', { ascending: false })
@@ -371,11 +530,9 @@ export async function createStandalonePayment(payload: {
   try {
     if (payload.amount <= 0) throw new Error('المبلغ يجب أن يكون أكبر من صفر')
 
-    // 1. توليد رقم السند
-    const { data: payNo } = await db.rpc('next_payment_number', { direction: payload.direction })
+    const { data: payNo } = await supabase.rpc('next_payment_number', { direction: payload.direction })
 
-    // 2. حفظ السند
-    const { data: pay, error: payErr } = await db.from('customer_payments').insert({
+    const { data: pay, error: payErr } = await supabase.from('customer_payments').insert({
       customer_id: payload.customerId,
       payment_no: payNo as string,
       amount: payload.amount,
@@ -387,7 +544,6 @@ export async function createStandalonePayment(payload: {
 
     if (payErr) throw payErr
 
-    // 3. تحديث رصيد العميل
     const { data: cust } = await db.customers()
       .select('current_balance').eq('id', payload.customerId).single()
     if (cust) {
@@ -397,7 +553,6 @@ export async function createStandalonePayment(payload: {
       }).eq('id', payload.customerId)
     }
 
-    // 4. حركة الخزينة
     if (payload.paymentMethod === 'cash') {
       const { data: reg } = await db.cash_registers()
         .select('id, current_balance').eq('is_active', true).single()
