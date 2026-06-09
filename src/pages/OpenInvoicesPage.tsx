@@ -18,8 +18,11 @@ function OpenInvoiceDetailModal({ saleId, onClose, onChange }: any) {
   const [loading, setLoading] = useState(true)
   const [tab, setTab] = useState<'items' | 'add-item' | 'payment'>('items')
 
+  // 🆕 بحث محسّن
   const [search, setSearch] = useState('')
-  const [variants, setVariants] = useState<any[]>([])
+  const [allVariants, setAllVariants] = useState<any[]>([])
+  const [filteredVariants, setFilteredVariants] = useState<any[]>([])
+  const [loadingVariants, setLoadingVariants] = useState(false)
   const [selectedVariant, setSelectedVariant] = useState<any>(null)
   const [qty, setQty] = useState(1)
   const [price, setPrice] = useState(0)
@@ -29,21 +32,44 @@ function OpenInvoiceDetailModal({ saleId, onClose, onChange }: any) {
   const [payNotes, setPayNotes] = useState('')
 
   useEffect(() => { load() }, [saleId])
+
+  // 🆕 جلب كل المنتجات مرة واحدة
   useEffect(() => {
-    if (search.length < 2) { setVariants([]); return }
+    setLoadingVariants(true)
     db.product_variants()
       .select(`id, size_name, sku, barcode, cost_price, sale_price, product:products!inner(id, name, is_active)`)
-      .eq('is_active', true).eq('product.is_active', true).limit(30)
+      .eq('is_active', true)
+      .eq('product.is_active', true)
+      .order('sku')
+      .limit(2000)
       .then(({ data }) => {
-        if (!data) return
-        const term = search.toLowerCase()
-        setVariants(data.filter((v: any) =>
-          v.product?.name?.toLowerCase().includes(term) ||
-          v.sku?.toLowerCase().includes(term) ||
-          v.barcode === search
-        ))
+        if (data) {
+          setAllVariants(data)
+          setFilteredVariants(data.slice(0, 30))
+        }
+        setLoadingVariants(false)
       })
-  }, [search])
+  }, [])
+
+  // 🆕 فلترة محلية فورية
+  useEffect(() => {
+    if (search.length === 0) {
+      setFilteredVariants(allVariants.slice(0, 30))
+      return
+    }
+    const term = search.toLowerCase().trim()
+    const filtered = allVariants.filter((v: any) => {
+      const name = (v.product?.name ?? '').toLowerCase()
+      const size = (v.size_name ?? '').toLowerCase()
+      const sku = (v.sku ?? '').toLowerCase()
+      const barcode = v.barcode ?? ''
+      return name.includes(term) ||
+             size.includes(term) ||
+             sku.includes(term) ||
+             barcode === search
+    }).slice(0, 50)
+    setFilteredVariants(filtered)
+  }, [search, allVariants])
 
   async function load() {
     setLoading(true)
@@ -186,40 +212,97 @@ function OpenInvoiceDetailModal({ saleId, onClose, onChange }: any) {
             <div className="space-y-3">
               {!selectedVariant ? (
                 <>
-                  <input value={search} onChange={e => setSearch(e.target.value)} placeholder="🔍 ابحث عن منتج..." className="w-full px-3 py-2.5 border-2 rounded-xl text-sm outline-none focus:border-amber-400" autoFocus />
-                  <div className="max-h-64 overflow-y-auto space-y-1">
-                    {variants.map((v: any) => (
-                      <button key={v.id} onClick={() => { setSelectedVariant(v); setPrice(v.sale_price) }} className="w-full p-3 bg-gray-50 hover:bg-amber-50 rounded-xl text-right">
-                        <p className="text-sm font-bold">{v.product.name}</p>
-                        <p className="text-xs text-gray-500">{v.size_name} | {formatCurrency(v.sale_price)}</p>
-                      </button>
-                    ))}
+                  <div className="relative">
+                    <Search size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                    <input
+                      value={search}
+                      onChange={e => setSearch(e.target.value)}
+                      placeholder="🔍 ابحث بالاسم أو الكود أو الحجم..."
+                      className="w-full pr-9 pl-3 py-3 border-2 rounded-xl text-sm outline-none focus:border-amber-400"
+                      autoFocus
+                    />
                   </div>
+
+                  {loadingVariants ? (
+                    <div className="text-center py-8 text-gray-400 text-sm">⏳ جاري تحميل المنتجات...</div>
+                  ) : (
+                    <>
+                      <div className="text-xs text-gray-500">
+                        {search ? `${filteredVariants.length} نتيجة` : `إجمالي المنتجات: ${allVariants.length}`}
+                      </div>
+                      <div className="max-h-80 overflow-y-auto space-y-1 border rounded-xl bg-gray-50 p-2">
+                        {filteredVariants.length === 0 ? (
+                          <div className="text-center py-8 text-gray-400 text-sm">
+                            لا توجد منتجات مطابقة
+                          </div>
+                        ) : filteredVariants.map((v: any) => (
+                          <button
+                            key={v.id}
+                            onClick={() => { setSelectedVariant(v); setPrice(v.sale_price) }}
+                            className="w-full p-3 bg-white hover:bg-amber-50 rounded-xl text-right border border-gray-100 hover:border-amber-300 transition-all"
+                          >
+                            <div className="flex justify-between items-start">
+                              <div className="flex-1">
+                                <p className="text-sm font-bold text-gray-900">{v.product.name}</p>
+                                <p className="text-xs text-gray-500 mt-1">
+                                  📦 {v.size_name}
+                                  {v.sku && <span className="mr-2">| كود: {v.sku}</span>}
+                                </p>
+                              </div>
+                              <div className="text-left">
+                                <p className="text-sm font-black text-amber-600">{formatCurrency(v.sale_price)}</p>
+                                {v.cost_price > 0 && <p className="text-[10px] text-gray-400">شراء: {formatCurrency(v.cost_price)}</p>}
+                              </div>
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    </>
+                  )}
                 </>
               ) : (
-                <div className="space-y-3 bg-amber-50 p-4 rounded-xl">
+                <div className="space-y-3 bg-amber-50 p-4 rounded-xl border-2 border-amber-200">
                   <div className="flex justify-between items-start">
                     <div>
-                      <p className="font-bold">{selectedVariant.product.name}</p>
-                      <p className="text-xs text-gray-500">{selectedVariant.size_name}</p>
+                      <p className="font-bold text-base">{selectedVariant.product.name}</p>
+                      <p className="text-sm text-gray-600">{selectedVariant.size_name}</p>
+                      {selectedVariant.sku && <p className="text-xs text-gray-500 mt-1">كود: {selectedVariant.sku}</p>}
                     </div>
-                    <button onClick={() => setSelectedVariant(null)} className="text-red-500"><X size={18} /></button>
+                    <button onClick={() => setSelectedVariant(null)} className="text-red-500"><X size={20} /></button>
                   </div>
+
                   <div className="grid grid-cols-2 gap-3">
                     <div>
                       <label className="block text-xs font-bold mb-1">الكمية</label>
-                      <input type="number" value={qty} onChange={e => setQty(+e.target.value || 1)} min={1} className="w-full px-3 py-2 border-2 rounded-lg text-center" />
+                      <input
+                        type="number"
+                        value={qty}
+                        onChange={e => setQty(+e.target.value || 1)}
+                        min={1}
+                        className="w-full px-3 py-2.5 border-2 rounded-lg text-center text-lg font-bold outline-none focus:border-amber-400"
+                      />
                     </div>
                     <div>
                       <label className="block text-xs font-bold mb-1">السعر</label>
-                      <input type="number" value={price} onChange={e => setPrice(+e.target.value || 0)} step="0.01" className="w-full px-3 py-2 border-2 rounded-lg text-center" />
+                      <input
+                        type="number"
+                        value={price}
+                        onChange={e => setPrice(+e.target.value || 0)}
+                        step="0.01"
+                        className="w-full px-3 py-2.5 border-2 rounded-lg text-center text-lg font-bold outline-none focus:border-amber-400"
+                      />
                     </div>
                   </div>
-                  <div className="bg-white rounded-lg p-2 text-center">
+
+                  <div className="bg-white rounded-lg p-3 text-center">
                     <p className="text-xs text-gray-500">الإجمالي</p>
-                    <p className="text-lg font-black text-amber-600">{formatCurrency(qty * price)}</p>
+                    <p className="text-2xl font-black text-amber-600">{formatCurrency(qty * price)}</p>
                   </div>
-                  <button onClick={handleAddItem} className="w-full py-2.5 bg-amber-500 text-white rounded-xl font-bold hover:opacity-90">
+
+                  <button
+                    onClick={handleAddItem}
+                    className="w-full py-3 bg-amber-500 text-white rounded-xl font-bold hover:opacity-90 text-base"
+                  >
                     ➕ إضافة للفاتورة
                   </button>
                 </div>
@@ -277,7 +360,6 @@ function OpenInvoiceDetailModal({ saleId, onClose, onChange }: any) {
   )
 }
 
-// 🆕 Modal محسّن: إنشاء فاتورة + إضافة عميل جديد
 function NewOpenInvoiceModal({ onClose, onCreated }: any) {
   const { user, activeWarehouse } = useAppStore()
   const [customers, setCustomers] = useState<any[]>([])
@@ -285,7 +367,6 @@ function NewOpenInvoiceModal({ onClose, onCreated }: any) {
   const [creating, setCreating] = useState(false)
   const [showNewCustomer, setShowNewCustomer] = useState(false)
 
-  // بيانات العميل الجديد
   const [newName, setNewName] = useState('')
   const [newPhone, setNewPhone] = useState('')
   const [newType, setNewType] = useState('retail')
@@ -331,7 +412,6 @@ function NewOpenInvoiceModal({ onClose, onCreated }: any) {
       return
     }
 
-    // إنشاء الفاتورة فوراً للعميل الجديد
     if (!activeWarehouse?.id) {
       setSavingCustomer(false)
       alert('لا يوجد مخزن')
@@ -366,36 +446,17 @@ function NewOpenInvoiceModal({ onClose, onCreated }: any) {
               <div className="bg-blue-50 rounded-xl p-3 text-xs text-blue-800">
                 💡 سيتم إنشاء العميل وفتح فاتورة له فوراً
               </div>
-
               <div>
                 <label className="block text-sm font-bold mb-1">اسم العميل *</label>
-                <input
-                  value={newName}
-                  onChange={e => setNewName(e.target.value)}
-                  placeholder="مثال: محمد أحمد"
-                  className="w-full px-3 py-2.5 border-2 rounded-xl text-sm outline-none focus:border-amber-400"
-                  autoFocus
-                />
+                <input value={newName} onChange={e => setNewName(e.target.value)} placeholder="مثال: محمد أحمد" className="w-full px-3 py-2.5 border-2 rounded-xl text-sm outline-none focus:border-amber-400" autoFocus />
               </div>
-
               <div>
                 <label className="block text-sm font-bold mb-1">رقم الهاتف</label>
-                <input
-                  value={newPhone}
-                  onChange={e => setNewPhone(e.target.value)}
-                  type="tel"
-                  placeholder="01xxxxxxxxx"
-                  className="w-full px-3 py-2.5 border-2 rounded-xl text-sm outline-none focus:border-amber-400"
-                />
+                <input value={newPhone} onChange={e => setNewPhone(e.target.value)} type="tel" placeholder="01xxxxxxxxx" className="w-full px-3 py-2.5 border-2 rounded-xl text-sm outline-none focus:border-amber-400" />
               </div>
-
               <div>
                 <label className="block text-sm font-bold mb-1">نوع العميل</label>
-                <select
-                  value={newType}
-                  onChange={e => setNewType(e.target.value)}
-                  className="w-full px-3 py-2.5 border-2 rounded-xl text-sm bg-white outline-none"
-                >
+                <select value={newType} onChange={e => setNewType(e.target.value)} className="w-full px-3 py-2.5 border-2 rounded-xl text-sm bg-white outline-none">
                   <option value="retail">عادي</option>
                   <option value="wholesale">جملة</option>
                   <option value="contractor">مقاول</option>
@@ -406,17 +467,9 @@ function NewOpenInvoiceModal({ onClose, onCreated }: any) {
                 </select>
               </div>
             </div>
-
             <div className="p-4 border-t flex gap-2">
-              <button onClick={() => setShowNewCustomer(false)} className="flex-1 py-2.5 border-2 rounded-xl font-bold hover:bg-gray-50">
-                ← رجوع
-              </button>
-              <button
-                onClick={handleAddNewCustomer}
-                disabled={savingCustomer}
-                className="flex-1 py-2.5 text-white font-bold rounded-xl hover:opacity-90 disabled:opacity-50"
-                style={{ background: 'linear-gradient(to left, #F59E0B, #D97706)' }}
-              >
+              <button onClick={() => setShowNewCustomer(false)} className="flex-1 py-2.5 border-2 rounded-xl font-bold hover:bg-gray-50">← رجوع</button>
+              <button onClick={handleAddNewCustomer} disabled={savingCustomer} className="flex-1 py-2.5 text-white font-bold rounded-xl hover:opacity-90 disabled:opacity-50" style={{ background: 'linear-gradient(to left, #F59E0B, #D97706)' }}>
                 {savingCustomer ? '⏳' : '✅ حفظ وإنشاء فاتورة'}
               </button>
             </div>
@@ -424,25 +477,14 @@ function NewOpenInvoiceModal({ onClose, onCreated }: any) {
         ) : (
           <>
             <div className="p-3 border-b space-y-2">
-              <input
-                value={search}
-                onChange={e => setSearch(e.target.value)}
-                placeholder="🔍 ابحث عن عميل..."
-                className="w-full px-3 py-2 border-2 rounded-lg text-sm"
-              />
-              <button
-                onClick={() => setShowNewCustomer(true)}
-                className="w-full py-2 bg-amber-50 text-amber-700 rounded-lg text-sm font-bold hover:bg-amber-100 flex items-center justify-center gap-2"
-              >
+              <input value={search} onChange={e => setSearch(e.target.value)} placeholder="🔍 ابحث عن عميل..." className="w-full px-3 py-2 border-2 rounded-lg text-sm" />
+              <button onClick={() => setShowNewCustomer(true)} className="w-full py-2 bg-amber-50 text-amber-700 rounded-lg text-sm font-bold hover:bg-amber-100 flex items-center justify-center gap-2">
                 <UserPlus size={14} /> ➕ إضافة عميل جديد
               </button>
             </div>
-
             <div className="flex-1 overflow-y-auto p-3 space-y-1">
               {customers.length === 0 ? (
-                <div className="text-center py-8 text-gray-400 text-sm">
-                  لا يوجد عملاء. اضغط "إضافة عميل جديد"
-                </div>
+                <div className="text-center py-8 text-gray-400 text-sm">لا يوجد عملاء. اضغط "إضافة عميل جديد"</div>
               ) : customers.map((c: any) => (
                 <button key={c.id} onClick={() => handleCreate(c.id)} disabled={creating} className="w-full p-3 bg-gray-50 hover:bg-amber-50 rounded-xl text-right">
                   <p className="text-sm font-bold">{c.name}</p>
