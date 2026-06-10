@@ -110,7 +110,7 @@ export async function updateProduct(id: string, updates: Partial<Product>) {
 export async function deleteProduct(id: string) {
   try {
     const { error } = await db.products()
-      .update({ is_active: false })
+      .update({ is_active: false, updated_at: new Date().toISOString() })
       .eq('id', id)
     if (error) throw error
     return { success: true }
