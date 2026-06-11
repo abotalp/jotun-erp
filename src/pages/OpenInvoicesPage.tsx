@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react'
 import {
   useOpenInvoices, getOpenInvoice,
-  addItemToOpenInvoice, removeItemFromOpenInvoice,
+  addItemToOpenInvoice, removeItemFromOpenInvoice, updateInvoiceItem,
   addPaymentToInvoice, updatePayment, deletePayment,
   closeOpenInvoice, createOpenInvoice
 } from '@/hooks/useOpenInvoices'
@@ -13,7 +13,7 @@ import PrintInvoice from '@/components/pos/PrintInvoice'
 import {
   Plus, Search, X, FileText, Eye, AlertCircle, Trash2,
   DollarSign, Lock, UserPlus, Edit2, Palette, Tag,
-  ShoppingCart, Receipt
+  ShoppingCart
 } from 'lucide-react'
 
 export default function OpenInvoicesPage() {
@@ -119,6 +119,7 @@ function FullInvoiceModal({ saleId, onClose, onChange }: any) {
   const [editingPayment, setEditingPayment] = useState<any>(null)
   const [printData, setPrintData] = useState<any>(null)
   const [showPaymentsList, setShowPaymentsList] = useState(false)
+  const [addingItem, setAddingItem] = useState(false)
 
   useEffect(() => { load() }, [saleId])
 
@@ -155,38 +156,44 @@ function FullInvoiceModal({ saleId, onClose, onChange }: any) {
   }
 
   async function handleQuickAdd(v: any) {
-    if (!activeWarehouse?.id) { alert('لا يوجد مخزن'); return }
+    if (!activeWarehouse?.id || addingItem) return
+    setAddingItem(true)
+
+    // تحديث فوري
     const newItem = { id: 'temp_' + Date.now(), variant_id: v.id, product_name: v.product.name, size_name: v.size_name, quantity: 1, unit_price: v.sale_price, total: v.sale_price, cost_price: v.cost_price, color: null }
     setInvoice((prev: any) => ({ ...prev, items: [...(prev.items ?? []), newItem], total: (prev.total ?? 0) + v.sale_price, subtotal: (prev.subtotal ?? 0) + v.sale_price, remaining: (prev.remaining ?? 0) + v.sale_price }))
-    addItemToOpenInvoice(saleId, { variantId: v.id, productName: v.product.name, sizeName: v.size_name, quantity: 1, unitPrice: v.sale_price, costPrice: v.cost_price }, activeWarehouse.id, user?.id).then(r => { if (r.success) load(); else alert(r.error) })
+
+    // حفظ في الخلفية
+    const r = await addItemToOpenInvoice(saleId, { variantId: v.id, productName: v.product.name, sizeName: v.size_name, quantity: 1, unitPrice: v.sale_price, costPrice: v.cost_price }, activeWarehouse.id, user?.id)
+    setAddingItem(false)
+    if (r.success) load()
+    else alert(r.error)
   }
 
-  async function handleUpdateItemQty(itemId: string, newQty: number) {
-    if (newQty <= 0) return
+  function handleUpdateItemQty(itemId: string, newQty: number) {
+    if (newQty <= 0 || newQty > 9999 || itemId.startsWith('temp_')) return
     const item = (invoice.items ?? []).find((i: any) => i.id === itemId)
-    if (!item || !activeWarehouse?.id) return
+    if (!item) return
+
     const oldTotal = item.total ?? 0
     const newTotal = newQty * item.unit_price
     setInvoice((prev: any) => ({ ...prev, items: (prev.items ?? []).map((i: any) => i.id === itemId ? { ...i, quantity: newQty, total: newTotal } : i), total: (prev.total ?? 0) - oldTotal + newTotal, subtotal: (prev.subtotal ?? 0) - oldTotal + newTotal, remaining: (prev.remaining ?? 0) - oldTotal + newTotal }))
-    await removeItemFromOpenInvoice(itemId, activeWarehouse.id, user?.id)
-    await addItemToOpenInvoice(saleId, { variantId: item.variant_id, productName: item.product_name, sizeName: item.size_name, quantity: newQty, unitPrice: item.unit_price, costPrice: item.cost_price ?? 0, color: item.color?.[0] ? { colorId: item.color[0].color_id, colorCode: item.color[0].color_code, colorName: item.color[0].color_name } : undefined }, activeWarehouse.id, user?.id)
-    load()
+    updateInvoiceItem(itemId, { quantity: newQty })
   }
 
-  async function handleUpdateItemPrice(itemId: string, newPrice: number) {
-    if (newPrice < 0) return
+  function handleUpdateItemPrice(itemId: string, newPrice: number) {
+    if (newPrice < 0 || newPrice > 999999 || itemId.startsWith('temp_')) return
     const item = (invoice.items ?? []).find((i: any) => i.id === itemId)
-    if (!item || !activeWarehouse?.id) return
+    if (!item) return
+
     const oldTotal = item.total ?? 0
     const newTotal = item.quantity * newPrice
     setInvoice((prev: any) => ({ ...prev, items: (prev.items ?? []).map((i: any) => i.id === itemId ? { ...i, unit_price: newPrice, total: newTotal } : i), total: (prev.total ?? 0) - oldTotal + newTotal, subtotal: (prev.subtotal ?? 0) - oldTotal + newTotal, remaining: (prev.remaining ?? 0) - oldTotal + newTotal }))
-    await removeItemFromOpenInvoice(itemId, activeWarehouse.id, user?.id)
-    await addItemToOpenInvoice(saleId, { variantId: item.variant_id, productName: item.product_name, sizeName: item.size_name, quantity: item.quantity, unitPrice: newPrice, costPrice: item.cost_price ?? 0, color: item.color?.[0] ? { colorId: item.color[0].color_id, colorCode: item.color[0].color_code, colorName: item.color[0].color_name } : undefined }, activeWarehouse.id, user?.id)
-    load()
+    updateInvoiceItem(itemId, { unit_price: newPrice })
   }
 
-  async function handleRemoveItem(itemId: string) {
-    if (!activeWarehouse?.id) return
+  function handleRemoveItem(itemId: string) {
+    if (!activeWarehouse?.id || itemId.startsWith('temp_')) return
     const removedItem = (invoice.items ?? []).find((i: any) => i.id === itemId)
     setInvoice((prev: any) => ({ ...prev, items: (prev.items ?? []).filter((i: any) => i.id !== itemId), total: Math.max(0, (prev.total ?? 0) - (removedItem?.total ?? 0)), subtotal: Math.max(0, (prev.subtotal ?? 0) - (removedItem?.total ?? 0)), remaining: Math.max(0, (prev.remaining ?? 0) - (removedItem?.total ?? 0)) }))
     removeItemFromOpenInvoice(itemId, activeWarehouse.id, user?.id).then(r => { if (r.success) load() })
@@ -206,9 +213,8 @@ function FullInvoiceModal({ saleId, onClose, onChange }: any) {
     if (r.success) { setPayAmount(0); setPayNotes(''); setShowPaymentForm(false); load() } else alert(r.error)
   }
 
-  async function handleDeletePayment(paymentId: string, amount: number) {
-    const r = await deletePayment(paymentId, user?.id)
-    if (r.success) load(); else alert(r.error)
+  function handleDeletePayment(paymentId: string) {
+    deletePayment(paymentId, user?.id).then(r => { if (r.success) load() })
   }
 
   async function handleCloseAndPrint() {
@@ -258,7 +264,7 @@ function FullInvoiceModal({ saleId, onClose, onChange }: any) {
             <div className="flex-1 overflow-y-auto p-3">
               <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
                 {filteredVariants.map((v: any) => (
-                  <button key={v.id} onClick={() => handleQuickAdd(v)} className="bg-white rounded-xl border-2 border-gray-100 p-3 text-right hover:border-amber-400 hover:shadow-md transition-all active:scale-95">
+                  <button key={v.id} onClick={() => handleQuickAdd(v)} disabled={addingItem} className="bg-white rounded-xl border-2 border-gray-100 p-3 text-right hover:border-amber-400 hover:shadow-md transition-all active:scale-95 disabled:opacity-50">
                     <div className="w-full h-16 rounded-lg mb-2 flex items-center justify-center text-2xl" style={{ background: 'linear-gradient(135deg, #1B2E4B, #1B3A6B)' }}>🎨</div>
                     <p className="text-xs font-bold line-clamp-2 mb-1">{v.product.name}</p>
                     <p className="text-[10px] text-gray-400 mb-1">{v.size_name}</p>
@@ -293,20 +299,22 @@ function FullInvoiceModal({ saleId, onClose, onChange }: any) {
                   <div className="grid grid-cols-3 gap-2 text-xs">
                     <div>
                       <label className="block text-[10px] text-gray-500 mb-0.5">الكمية</label>
-                      <input type="number" value={item.quantity} onChange={e => handleUpdateItemQty(item.id, +e.target.value || 1)} min={1} className="w-full px-2 py-1 border rounded-lg text-center font-bold" />
+                      <input type="number" defaultValue={item.quantity} onBlur={e => handleUpdateItemQty(item.id, +e.target.value || 1)} min={1} className="w-full px-2 py-1 border rounded-lg text-center font-bold" />
                     </div>
                     <div>
                       <label className="block text-[10px] text-gray-500 mb-0.5">السعر</label>
-                      <input type="number" value={item.unit_price} onChange={e => handleUpdateItemPrice(item.id, +e.target.value || 0)} step="0.01" className="w-full px-2 py-1 border rounded-lg text-center font-bold" />
+                      <input type="number" defaultValue={item.unit_price} onBlur={e => handleUpdateItemPrice(item.id, +e.target.value || 0)} step="0.01" className="w-full px-2 py-1 border rounded-lg text-center font-bold" />
                     </div>
                     <div>
                       <label className="block text-[10px] text-gray-500 mb-0.5">الإجمالي</label>
                       <p className="px-2 py-1 bg-amber-50 text-amber-700 rounded-lg text-center font-black text-sm">{formatCurrency(item.total)}</p>
                     </div>
                   </div>
-                  <button onClick={() => setShowColorPicker(item.id)} className={`w-full py-1.5 rounded-lg text-xs font-bold flex items-center justify-center gap-1 ${item.color?.[0] ? 'bg-purple-100 text-purple-700' : 'bg-gray-100 text-gray-500 hover:bg-purple-50'}`}>
-                    <Palette size={12} /> {item.color?.[0] ? 'تغيير اللون' : 'إضافة لون'}
-                  </button>
+                  {!item.id.startsWith('temp_') && (
+                    <button onClick={() => setShowColorPicker(item.id)} className={`w-full py-1.5 rounded-lg text-xs font-bold flex items-center justify-center gap-1 ${item.color?.[0] ? 'bg-purple-100 text-purple-700' : 'bg-gray-100 text-gray-500 hover:bg-purple-50'}`}>
+                      <Palette size={12} /> {item.color?.[0] ? 'تغيير اللون' : 'إضافة لون'}
+                    </button>
+                  )}
                 </div>
               ))}
             </div>
@@ -354,9 +362,7 @@ function FullInvoiceModal({ saleId, onClose, onChange }: any) {
               <button onClick={() => setPayAmount(finalTotal - invoice.paid)} className="py-2 bg-blue-50 text-blue-700 rounded-lg text-xs font-bold">الكل</button>
               <button onClick={() => setPayAmount((finalTotal - invoice.paid) / 2)} className="py-2 bg-gray-50 text-gray-700 rounded-lg text-xs font-bold">النصف</button>
             </div>
-            <select value={payMethod} onChange={e => setPayMethod(e.target.value)} className="w-full px-3 py-2.5 border-2 rounded-xl mb-3 bg-white">
-              <option value="cash">نقدي</option><option value="bank_transfer">تحويل</option><option value="visa">فيزا</option>
-            </select>
+            <select value={payMethod} onChange={e => setPayMethod(e.target.value)} className="w-full px-3 py-2.5 border-2 rounded-xl mb-3 bg-white"><option value="cash">نقدي</option><option value="bank_transfer">تحويل</option><option value="visa">فيزا</option></select>
             <input value={payNotes} onChange={e => setPayNotes(e.target.value)} placeholder="ملاحظات..." className="w-full px-3 py-2.5 border-2 rounded-xl mb-3 text-sm" />
             <div className="flex gap-3">
               <button onClick={() => setShowPaymentForm(false)} className="flex-1 py-2.5 border-2 rounded-xl font-bold">إلغاء</button>
@@ -381,7 +387,7 @@ function FullInvoiceModal({ saleId, onClose, onChange }: any) {
                   </div>
                   <div className="flex gap-1">
                     <button onClick={() => setEditingPayment(p)} className="p-2 text-blue-500 hover:bg-blue-50 rounded-lg"><Edit2 size={14} /></button>
-                    <button onClick={() => handleDeletePayment(p.id, p.amount)} className="p-2 text-red-500 hover:bg-red-50 rounded-lg"><Trash2 size={14} /></button>
+                    <button onClick={() => handleDeletePayment(p.id)} className="p-2 text-red-500 hover:bg-red-50 rounded-lg"><Trash2 size={14} /></button>
                   </div>
                 </div>
               ))}
@@ -391,7 +397,6 @@ function FullInvoiceModal({ saleId, onClose, onChange }: any) {
       )}
 
       {editingPayment && <EditPaymentModal payment={editingPayment} onClose={() => setEditingPayment(null)} onSaved={() => { setEditingPayment(null); load() }} />}
-
       {printData && <PrintInvoice invoice={printData} storeName={settings?.store_name} storePhone={settings?.store_phone ?? undefined} storeAddress={settings?.store_address ?? undefined} receiptFooter={settings?.receipt_footer} onClose={() => { setPrintData(null); onClose() }} />}
     </>
   )
@@ -404,7 +409,7 @@ function EditPaymentModal({ payment, onClose, onSaved }: any) {
   const [notes, setNotes] = useState(payment.notes ?? '')
 
   async function handleSave() {
-    if (amount <= 0) { alert('المبلغ يجب أن يكون أكبر من صفر'); return }
+    if (amount <= 0) { alert('المبلغ مطلوب'); return }
     const r = await updatePayment(payment.id, amount, method, notes, user?.id)
     if (r.success) onSaved(); else alert(r.error)
   }
@@ -412,12 +417,10 @@ function EditPaymentModal({ payment, onClose, onSaved }: any) {
   return (
     <div className="fixed inset-0 z-[70] flex items-center justify-center p-4" style={{ backgroundColor: 'rgba(0,0,0,0.7)' }} onClick={onClose}>
       <div onClick={e => e.stopPropagation()} className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
-        <div className="flex justify-between p-5 border-b"><h3 className="text-lg font-black text-blue-600">✏️ تعديل دفعة</h3><button onClick={onClose}><X size={20} /></button></div>
+        <div className="flex justify-between p-5 border-b"><h3 className="text-lg font-black text-blue-600">✏️ تعديل</h3><button onClick={onClose}><X size={20} /></button></div>
         <div className="p-5 space-y-3">
           <input type="number" value={amount} onChange={e => setAmount(+e.target.value || 0)} className="w-full px-3 py-3 border-2 rounded-xl text-2xl font-black text-center" autoFocus />
-          <select value={method} onChange={e => setMethod(e.target.value)} className="w-full px-3 py-2.5 border-2 rounded-xl bg-white">
-            <option value="cash">نقدي</option><option value="bank_transfer">تحويل</option><option value="visa">فيزا</option>
-          </select>
+          <select value={method} onChange={e => setMethod(e.target.value)} className="w-full px-3 py-2.5 border-2 rounded-xl bg-white"><option value="cash">نقدي</option><option value="bank_transfer">تحويل</option><option value="visa">فيزا</option></select>
           <input value={notes} onChange={e => setNotes(e.target.value)} placeholder="ملاحظات..." className="w-full px-3 py-2.5 border-2 rounded-xl text-sm" />
         </div>
         <div className="p-5 border-t flex gap-3">
